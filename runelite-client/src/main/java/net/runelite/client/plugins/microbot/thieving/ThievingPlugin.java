@@ -38,7 +38,7 @@ public class ThievingPlugin extends Plugin {
     @Inject
     private ThievingScript thievingScript;
 
-    public static String version = "1.6.6";
+    public static String version = "1.6.7";
     private int startXp = 0;
 	@Getter
 	private int maxCoinPouch;
@@ -48,20 +48,23 @@ public class ThievingPlugin extends Plugin {
         if (overlayManager != null) {
             overlayManager.add(thievingOverlay);
         }
-        startXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
+        if (startXp == 0) {
+            startXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
+        }
 		maxCoinPouch = determineMaxCoinPouch();
         thievingScript.run();
     }
 
     protected void shutDown() {
 		maxCoinPouch = 0;
+        startXp = 0;
         thievingScript.shutdown();
         overlayManager.remove(thievingOverlay);
     }
 
     public int xpGained() {
         int currentXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
-        return currentXp - startXp;
+        return startXp > 0 ? currentXp - startXp : Integer.parseInt("0");
     }
 
 	public int determineMaxCoinPouch() {
