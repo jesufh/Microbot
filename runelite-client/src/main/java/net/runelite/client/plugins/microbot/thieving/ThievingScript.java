@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.thieving;
 
 import com.google.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.ObjectComposition;
@@ -79,6 +80,15 @@ public class ThievingScript extends Script {
 
     private static final Set<String> VYRES = Set.of("Natalidae Shadum", "Misdrievus Shadum", "Vallessia von Pitt"); // add more...
 
+    private long lastShadowVeil = 0;
+    private static final ActionTimer DOOR_TIMER = new ActionTimer();
+    private final long[] doorCloseTime = new long[3];
+    private int doorCloseIndex = 0;
+
+    public static int getCloseDoorTime() {
+        return DOOR_TIMER.getRemainingTime();
+    }
+
     @Inject
     public ThievingScript(final ThievingConfig config, final ThievingPlugin plugin)
     {
@@ -149,17 +159,28 @@ public class ThievingScript extends Script {
     }
 
     private boolean hasReqs() {
-        boolean hasFood = Rs2Inventory.getInventoryFood().size() >= config.foodAmount();
-        boolean hasDodgy = Rs2Inventory.hasItem("Dodgy necklace") || config.dodgyNecklaceAmount() == 0;
-
-        if (config.shadowVeil()) {
-            boolean hasCosmic = Rs2Inventory.hasItem("Cosmic rune");
-            boolean hasStaff = Rs2Equipment.isWearing("Lava battlestaff");
-            boolean hasRunes = hasStaff || Rs2Inventory.hasItem("Earth rune", "Fire rune");
-            return hasFood && hasDodgy && hasCosmic && hasRunes;
+        boolean hasReqs = true;
+        if (Rs2Inventory.getInventoryFood().size() <= config.foodAmount()) {
+            log.info("Missing food");
+            hasReqs = false;
+        }
+        if (config.dodgyNecklaceAmount() > 0 && !Rs2Inventory.hasItem("Dodgy necklace")) {
+            log.info("Missing dodgy necklaces");
+            hasReqs = false;
         }
 
-        return hasFood && hasDodgy;
+        if (config.shadowVeil()) {
+            if (!Rs2Inventory.hasItem("Cosmic rune")) {
+                log.info("Missing cosmic runes");
+                hasReqs = false;
+            }
+            boolean hasRunes = Rs2Equipment.isWearing("Lava battlestaff") || Rs2Inventory.hasItem("Earth rune", "Fire rune");
+            if (!hasRunes) {
+                log.info("Missing lava battle staff or earth & fire runes");
+                hasReqs = false;
+            }
+        }
+        return hasReqs;
     }
 
     private boolean isPointInPolygon(WorldPoint[] polygon, WorldPoint point) {
@@ -182,6 +203,11 @@ public class ThievingScript extends Script {
         return inside;
     }
 
+    private boolean shouldAutoEatAndDrop() {
+        if (Rs2Inventory.isFull()) return true;
+        return config.useFood() && Rs2Player.getHealthPercentage() <= config.hitpoints();
+    }
+
     private boolean autoEatAndDrop() {
         if (config.useFood()) {
             if (Rs2Inventory.getInventoryFood().isEmpty()) {
@@ -198,18 +224,37 @@ public class ThievingScript extends Script {
         return true;
     }
 
+    private boolean shouldCastShadowVeil() {
+        if (!config.shadowVeil()) return false;
+        return lastShadowVeil + 60_000 <= System.currentTimeMillis() || !Rs2Magic.isShadowVeilActive();
+    }
+
     private void castShadowVeil() {
-        if (!Rs2Magic.isShadowVeilActive() && Rs2Magic.canCast(MagicAction.SHADOW_VEIL)) {
-            Rs2Magic.cast(MagicAction.SHADOW_VEIL);
-            sleep(600);
+        if (!shouldCastShadowVeil()) return;
+        if (!Rs2Magic.canCast(MagicAction.SHADOW_VEIL)) {
+            log.error("Cannot cast shadow veil");
+            return;
         }
+        if (!Rs2Magic.cast(MagicAction.SHADOW_VEIL)) {
+            log.error("Failed to cast shadow veil");
+            return;
+        }
+        if (!sleepUntil(Rs2Magic::isShadowVeilActive, 1_500)) {
+            log.error("Failed to await shadow veil active");
+            return;
+        }
+        lastShadowVeil = System.currentTimeMillis();
     }
 
     private void openCoinPouches() {
-        int threshold = Math.max(1, Math.min(plugin.getMaxCoinPouch(), config.coinPouchTreshHold() + (int)(Math.random() * 7 - 3)));
-        if (Rs2Inventory.hasItemAmount("coin pouch", threshold, true)) {
+        if (shouldOpenCoinPouches()) {
             Rs2Inventory.interact("coin pouch", "Open-all");
         }
+    }
+
+    private boolean shouldOpenCoinPouches() {
+        int threshold = Math.max(1, Math.min(plugin.getMaxCoinPouch(), config.coinPouchTreshHold() + (int)(Math.random() * 7 - 3)));
+        return Rs2Inventory.hasItemAmount("coin pouch", threshold, true);
     }
 
     private void wearIfNot(String item) {
@@ -229,7 +274,7 @@ public class ThievingScript extends Script {
 					if (!Microbot.isLoggedIn()) break;
                     openCoinPouches();
                     if (!autoEatAndDrop()) break;
-                    if (config.shadowVeil()) castShadowVeil();
+                    castShadowVeil();
                     if (!Rs2Npc.pickpocket(npc)) continue;
                     sleep(200, 300);
                 }
@@ -246,15 +291,15 @@ public class ThievingScript extends Script {
     }
 
     private void pickpocket(Predicate<Rs2NpcModel> filter) {
+        pickpocket(filter, npc -> true);
+    }
+
+    private void pickpocket(Predicate<Rs2NpcModel> filter, Predicate<Rs2NpcModel> tester) {
         if (pickpocketHighlighted()) return;
 
         equipSet(ROGUE_SET);
         Rs2NpcModel npc = null;
-        while (!Rs2Player.isStunned() && isRunning() && Microbot.isLoggedIn()) {
-            openCoinPouches();
-            if (!autoEatAndDrop()) break;
-            if (config.shadowVeil()) castShadowVeil();
-
+        while (isRunning() && Microbot.isLoggedIn()) {
             if (isNpcNull(npc)) {
                 npc = Rs2NpcCache.getAllNpcs().filter(filter)
                         .filter(n -> !isNpcNull(n))
@@ -266,6 +311,20 @@ public class ThievingScript extends Script {
                     continue;
                 }
                 log.info("Found new NPC={} to thieve @ {}", npc.getName(), toString(npc.getWorldLocation()));
+            }
+
+            if (Rs2Player.isStunned()) {
+                // if we shouldn't ignore stuns or we need to execute an action for which we can't be stunned
+                if (!config.ignoreStuns() || shouldOpenCoinPouches() || shouldAutoEatAndDrop() || shouldCastShadowVeil()) {
+                    sleepUntil(() -> !Rs2Player.isStunned(), 5_000);
+                    continue;
+                }
+            } else {
+                // actions we only want to do when not stunned
+                openCoinPouches();
+                if (!autoEatAndDrop()) break;
+                if (!tester.test(npc)) continue;
+                castShadowVeil();
             }
             Rs2Npc.pickpocket(npc);
             sleep(200, 300);
@@ -289,7 +348,7 @@ public class ThievingScript extends Script {
 			if (!Microbot.isLoggedIn()) break;
             openCoinPouches();
             if (!autoEatAndDrop()) break;
-            if (config.shadowVeil()) castShadowVeil();
+            castShadowVeil();
             if (!Rs2Npc.pickpocket(highlighted)) continue;
             sleep(200, 300);
         }
@@ -297,25 +356,46 @@ public class ThievingScript extends Script {
     }
 
     private void pickpocketVyre() {
-        Rs2NpcModel vyre = Rs2Npc.getNpcs().filter(x -> VYRES.contains(x.getName())).findFirst().orElse(null);
-        if (vyre == null) {
-            pickpocketDefault((Rs2NpcModel) null);
-            return;
-        }
-        WorldPoint[] housePolygon = VYRE_HOUSES.get(vyre.getName());
-        boolean npcInside = isPointInPolygon(housePolygon, vyre.getWorldLocation());
-        boolean playerInside = isPointInPolygon(housePolygon, Rs2Player.getWorldLocation());
+        DOOR_TIMER.unset();
+        pickpocket(npc -> VYRES.contains(npc.getName()), npc -> {
+            if (npc == null) return false;
+            final WorldPoint[] housePolygon = VYRE_HOUSES.get(npc.getName());
+            boolean npcInside = isPointInPolygon(housePolygon, npc.getWorldLocation());
+            boolean playerInside = isPointInPolygon(housePolygon, Rs2Player.getWorldLocation());
 
-        if (!npcInside && playerInside) {
-            boolean inside = waitUntilBothInPolygon(housePolygon, vyre, 8000 + (int)(Math.random() * 4000));
-            if (!inside) {
-                HopToWorld();
-                return;
+            if (!npcInside && playerInside) {
+                boolean inside = waitUntilBothInPolygon(housePolygon, npc, 8_000 + (int)(Math.random() * 4_000));
+                if (!inside) {
+                    HopToWorld();
+                    return false;
+                }
+            } else {
+                List<TileObject> doors = getDoors(Rs2Player.getWorldLocation(), 4);
+                if (doors.isEmpty()) {
+                    DOOR_TIMER.unset();
+                    return true;
+                } else if (DOOR_TIMER.isSet()) {
+                    if (DOOR_TIMER.isTime()) {
+                        if (Rs2Player.isStunned()) sleepUntil(() -> !Rs2Player.isStunned(), 5_000);
+                        final long current = System.currentTimeMillis();
+                        // did we close the door 3 times in the last 2min? (probably someone troll opening door)
+                        if (Arrays.stream(doorCloseTime).allMatch(time -> time - 120_000 > current)) {
+                            HopToWorld();
+                            return false;
+                        }
+                        doorCloseTime[doorCloseIndex] = current;
+                        doorCloseIndex = (doorCloseIndex+1) % doorCloseTime.length;
+                        if (closeNearbyDoor(4)) DOOR_TIMER.unset();
+                        return false;
+                    }
+                } else {
+                    // delayed door closing
+                    log.info("Found {} open door(s).", doors.size());
+                    DOOR_TIMER.set(System.currentTimeMillis()+3_000+(int) (Math.random()*4_000));
+                }
             }
-        } else {
-            closeNearbyDoor(3);
-            pickpocketDefault(vyre);
-        }
+            return true;
+        });
     }
 
     private void pickpocketArdougneKnight() {
@@ -338,19 +418,29 @@ public class ThievingScript extends Script {
         }
     }
 
-    private void closeNearbyDoor(int radius) {
-        Rs2GameObject.getAll(
-            o -> {
-                ObjectComposition comp = Rs2GameObject.convertToObjectComposition(o);
-                return comp != null && Arrays.asList(comp.getActions()).contains("Close");
-            },
-            Rs2Player.getWorldLocation(),
-            radius
-        ).forEach(door -> {
-            if (Rs2GameObject.interact(door, "Close")) {
-                Rs2Player.waitForWalking();
+    private List<TileObject> getDoors(WorldPoint wp, int radius) {
+        return Rs2GameObject.getAll(
+                o -> {
+                    ObjectComposition comp = Rs2GameObject.convertToObjectComposition(o);
+                    return comp != null && Arrays.asList(comp.getActions()).contains("Close");
+                },
+                wp,
+                radius
+        );
+    }
+
+    private boolean closeNearbyDoor(int radius) {
+        for (TileObject door : getDoors(Rs2Player.getWorldLocation(), radius)) {
+            final WorldPoint doorWp = door.getWorldLocation();
+            if (!Rs2GameObject.interact(door, "Close")) return false;
+            if (door.getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) > 1) Rs2Player.waitForWalking();
+            if (!sleepUntil(() -> getDoors(doorWp, 1).isEmpty(), 3_000)) {
+                log.warn("Failed to wait closing door @ {}", toString(doorWp));
+                return false;
             }
-        });
+            log.info("Closed door @ {}", toString(doorWp));
+        }
+        return true;
     }
 
     private void equipSet(Set<String> set) {
@@ -371,12 +461,22 @@ public class ThievingScript extends Script {
         }
     }
 
+    private String[] getExclusions() {
+        ArrayList<String> exclusions = new ArrayList<>();
+        if (config.shadowVeil()) {
+            exclusions.add("Cosmic rune");
+            exclusions.add("Earth rune");
+            exclusions.add("Fire rune");
+        }
+        return exclusions.toArray(String[]::new);
+    }
+
     private void bankAndEquip() {
         BankLocation bank = Rs2Bank.getNearestBank();
         if (bank == BankLocation.DARKMEYER) equipSet(VYRE_SET);
         boolean opened = Rs2Bank.isNearBank(bank, 8) ? Rs2Bank.openBank() : Rs2Bank.walkToBankAndUseBank(bank);
         if (!opened || !Rs2Bank.isOpen()) return;
-        Rs2Bank.depositAll();
+        Rs2Bank.depositAllExcept(getExclusions());
 
         boolean successfullyWithdrawFood = Rs2Bank.withdrawX(true, config.food().getName(), config.foodAmount(), true);
         Rs2Inventory.waitForInventoryChanges(3000);
@@ -418,38 +518,36 @@ public class ThievingScript extends Script {
         }
 
         if (config.shadowVeil()) {
-            List<String> runesShadowVeil = Arrays.asList("Earth rune", "Fire rune");
-            boolean banklavaStaff = Rs2Equipment.isWearing("Lava battlestaff") || Rs2Inventory.contains("Lava battlestaff") || Rs2Bank.hasItem("Lava battlestaff");
-            boolean bankrunes = Rs2Bank.hasItem(runesShadowVeil);
-            boolean bankcosmicRune = Rs2Bank.hasItem("Cosmic rune");
-
-            if (!banklavaStaff && !bankrunes) {
-                Microbot.showMessage("No Lava battlestaff and runes (Earth, Fire) found in bank.");
-                shutdown();
-                return;
-            }
-
-            if (!bankcosmicRune) {
-                Microbot.showMessage("No Cosmic rune found in bank.");
-                shutdown();
-                return;
-            }
-
-            if (banklavaStaff) {
-                Rs2Bank.withdrawItem("Lava battlestaff");
-                Rs2Inventory.waitForInventoryChanges(3000);
+            if (!Rs2Equipment.isWearing("Lava battlestaff")) {
+                if (!Rs2Inventory.contains("Lava battlestaff") &&
+                        !(Rs2Inventory.contains("Earth rune") && Rs2Inventory.contains("Fire rune"))) {
+                    if (Rs2Bank.hasItem("Lava battlestaff")) {
+                        Rs2Bank.withdrawItem("Lava battlestaff");
+                        Rs2Inventory.waitForInventoryChanges(3_000);
+                    } else if (Rs2Bank.hasItem("Earth rune") && Rs2Bank.hasItem("Fire rune")) {
+                        Rs2Bank.withdrawAll(true, "Fire rune", true);
+                        Rs2Inventory.waitForInventoryChanges(3000);
+                        Rs2Bank.withdrawAll(true, "Earth rune", true);
+                        Rs2Inventory.waitForInventoryChanges(3000);
+                    } else {
+                        Microbot.showMessage("No Lava battlestaff and runes (Earth, Fire) found in bank.");
+                        shutdown();
+                        return;
+                    }
+                }
                 if (Rs2Inventory.contains("Lava battlestaff")) {
                     Rs2Inventory.wear("Lava battlestaff");
                     Rs2Inventory.waitForInventoryChanges(3000);
                 }
-            } else {
-                Rs2Bank.withdrawAll(true, "Fire rune", true);
-                Rs2Inventory.waitForInventoryChanges(3000);
-                Rs2Bank.withdrawAll(true, "Earth rune", true);
-                Rs2Inventory.waitForInventoryChanges(3000);
             }
+
             Rs2Bank.withdrawAll(true, "Cosmic rune", true);
             Rs2Inventory.waitForInventoryChanges(3000);
+            if (!Rs2Inventory.hasItem("Cosmic rune")) {
+                Microbot.showMessage("No Cosmic runes found.");
+                shutdown();
+                return;
+            }
         }
 
         equipSet(ROGUE_SET);
@@ -483,17 +581,17 @@ public class ThievingScript extends Script {
     }
 
     private void HopToWorld() {
-        int attempts = 0;
-        int maxtries = 5;
-        Microbot.log("Hopping world, please wait...");
-        while (attempts < maxtries) {
+        final int maxAttempts = 5;
+
+        log.info("Hopping world, please wait...");
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
             int world = Login.getRandomWorld(true, null);
             Microbot.hopToWorld(world);
-            boolean hopSuccess = sleepUntil(() -> Rs2Player.getWorld() == world, 10000);
-            if (hopSuccess) break;
+            boolean hopSuccess = sleepUntil(() -> Rs2Player.getWorld() == world, 10_000);
+            if (hopSuccess) return;
             sleep(250, 350);
-            attempts++;
         }
+        log.error("Failed to hop world");
     }
 
     @Override
@@ -501,5 +599,37 @@ public class ThievingScript extends Script {
         super.shutdown();
         Rs2Walker.setTarget(null);
         Microbot.isCantReachTargetDetectionEnabled = false;
+    }
+
+    private static class ActionTimer {
+        long time;
+
+        public ActionTimer() {
+            time = Long.MAX_VALUE;
+        }
+
+        public boolean isSet() {
+            return time != Long.MAX_VALUE;
+        }
+
+        public boolean isTime() {
+            return System.currentTimeMillis() > time;
+        }
+
+        public int getRemainingTime() {
+            return isSet() ? Math.max(0, (int) (time-System.currentTimeMillis())) : -1;
+        }
+
+        public void unset() {
+            time = Long.MAX_VALUE;
+        }
+
+        public void set(long time) {
+            this.time = time;
+        }
+
+        public void set(int minDelay, int maxDelay) {
+            this.time = System.currentTimeMillis();
+        }
     }
 }

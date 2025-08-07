@@ -63,6 +63,17 @@ public interface ThievingConfig extends Config {
         return false;
     }
 
+    @ConfigItem(
+            keyName = "ignoreStuns",
+            name = "Ignore Stuns",
+            description = "Whether the bot should ignore stuns and keep left clicking",
+            position = 0,
+            section = buffsSection
+    )
+    default boolean ignoreStuns() {
+        return true;
+    }
+
     @ConfigSection(
             name = "Food",
             description = "Food and eating settings.",

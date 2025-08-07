@@ -25,6 +25,7 @@ import java.awt.*;
 @Slf4j
 public class ThievingPlugin extends Plugin {
     @Inject
+    @Getter
     private ThievingConfig config;
     @Provides
     ThievingConfig provideConfig(ConfigManager configManager) {

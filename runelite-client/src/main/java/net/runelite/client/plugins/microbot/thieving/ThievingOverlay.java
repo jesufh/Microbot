@@ -2,7 +2,8 @@ package net.runelite.client.plugins.microbot.thieving;
 
 import java.time.Duration;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.util.misc.TimeUtils;
+import net.runelite.client.plugins.microbot.thieving.enums.ThievingNpc;
+import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -10,7 +11,6 @@ import net.runelite.client.ui.overlay.components.TitleComponent;
 
 import javax.inject.Inject;
 import java.awt.*;
-import java.time.Instant;
 
 public class ThievingOverlay extends OverlayPanel {
     private final ThievingPlugin plugin;
@@ -24,6 +24,12 @@ public class ThievingOverlay extends OverlayPanel {
         setNaughty();
     }
 
+    private String getDoorString(int time) {
+        if (time == -1) return "Closed";
+        if (time == 0) return "Closing";
+        return "Closing in " + (time/1_000) + "s";
+    }
+
     @Override
     public Dimension render(Graphics2D graphics) {
         try {
@@ -31,7 +37,7 @@ public class ThievingOverlay extends OverlayPanel {
 
             panelComponent.getChildren().add(
                     TitleComponent.builder()
-                            .text("Micro Thieving V" + plugin.version)
+                            .text("Micro Thieving V" + ThievingPlugin.version)
                             .color(Color.ORANGE)
                             .build()
             );
@@ -42,6 +48,24 @@ public class ThievingOverlay extends OverlayPanel {
                             .right(String.valueOf(plugin.xpGained()))
                             .build()
             );
+
+            if (plugin.getConfig().THIEVING_NPC() == ThievingNpc.VYRES) {
+                panelComponent.getChildren().add(
+                        LineComponent.builder()
+                                .left("Door:")
+                                .right(getDoorString(ThievingScript.getCloseDoorTime()))
+                                .build()
+                );
+            }
+
+            if (plugin.getConfig().shadowVeil()) {
+                panelComponent.getChildren().add(
+                        LineComponent.builder()
+                                .left("Shadow Veil:")
+                                .right(Rs2Magic.isShadowVeilActive() ? "Active" : "Inactive")
+                                .build()
+                );
+            }
 
             panelComponent.getChildren().add(
                     LineComponent.builder()
