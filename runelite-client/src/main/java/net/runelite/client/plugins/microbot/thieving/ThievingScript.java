@@ -1,9 +1,11 @@
 package net.runelite.client.plugins.microbot.thieving;
 
 import com.google.inject.Inject;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.ObjectComposition;
+import net.runelite.client.plugins.microbot.util.cache.Rs2NpcCache;
 import net.runelite.client.plugins.skillcalculator.skills.MagicAction;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
@@ -21,7 +23,9 @@ import net.runelite.client.plugins.microbot.util.security.Login;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
+@Slf4j
 public class ThievingScript extends Script {
     private final ThievingConfig config;
     private final ThievingPlugin plugin;
@@ -66,6 +70,15 @@ public class ThievingScript extends Script {
         // add more...
     );
 
+    private static final Set<String> ELVES = Set.of("Anaire","Aranwe","Aredhel","Caranthir","Celebrian","Celegorm",
+            "Cirdan","Curufin","Earwen","Edrahil", "Elenwe","Elladan","Enel","Erestor","Enerdhil","Enelye","Feanor",
+            "Findis","Finduilas","Fingolfin", "Fingon","Galathil","Gelmir","Glorfindel","Guilin","Hendor","Idril",
+            "Imin","Iminye","Indis","Ingwe", "Ingwion","Lenwe","Lindir","Maeglin","Mahtan","Miriel","Mithrellas",
+            "Nellas","Nerdanel","Nimloth", "Oropher","Orophin","Saeros","Salgant","Tatie","Thingol","Turgon","Vaire",
+            "Goreu");
+
+    private static final Set<String> VYRES = Set.of("Natalidae Shadum", "Misdrievus Shadum", "Vallessia von Pitt"); // add more...
+
     @Inject
     public ThievingScript(final ThievingConfig config, final ThievingPlugin plugin)
     {
@@ -108,7 +121,7 @@ public class ThievingScript extends Script {
                                 pickpocketWealthyCitizen();
                                 break;
                             case ELVES:
-                                pickpocketElves();
+                                pickpocketDefault(ELVES);
                                 break;
                             case VYRES:
                                 pickpocketVyre();
@@ -117,8 +130,10 @@ public class ThievingScript extends Script {
                                 pickpocketArdougneKnight();
                                 break;
                             default:
-                                Rs2NpcModel npc = Rs2Npc.getNpc(config.THIEVING_NPC().getName());
-                                pickpocketDefault(npc);
+                                pickpocket(npc -> {
+                                    final String name = npc.getName();
+                                    return name != null && name.toLowerCase().contains(config.THIEVING_NPC().getName());
+                                });
                                 break;
                         }
                         break;
@@ -222,9 +237,48 @@ public class ThievingScript extends Script {
         }
     }
 
+    private boolean isNpcNull(Rs2NpcModel npc) {
+        if (npc == null) return true;
+        final String name = npc.getName();
+        if (name == null) return true;
+        if (name.equalsIgnoreCase("null")) return true;
+        return false;
+    }
+
+    private void pickpocket(Predicate<Rs2NpcModel> filter) {
+        if (pickpocketHighlighted()) return;
+
+        equipSet(ROGUE_SET);
+        Rs2NpcModel npc = null;
+        while (!Rs2Player.isStunned() && isRunning() && Microbot.isLoggedIn()) {
+            openCoinPouches();
+            if (!autoEatAndDrop()) break;
+            if (config.shadowVeil()) castShadowVeil();
+
+            if (isNpcNull(npc)) {
+                npc = Rs2NpcCache.getAllNpcs().filter(filter)
+                        .filter(n -> !isNpcNull(n))
+                        .min(Comparator.comparingInt(Rs2NpcModel::getDistanceFromPlayer)).orElse(null);
+                if (npc == null) {
+                    log.info("Walking back to starting location");
+                    Rs2Walker.walkTo(initialPlayerLocation, 0);
+                    Rs2Player.waitForWalking();
+                    continue;
+                }
+                log.info("Found new NPC={} to thieve @ {}", npc.getName(), toString(npc.getWorldLocation()));
+            }
+            Rs2Npc.pickpocket(npc);
+            sleep(200, 300);
+        }
+    }
+
+    private String toString(WorldPoint point) {
+        if (point == null) return "(-1,-1,-1)";
+        return "(" + point.getX() + "," + point.getY() + "," + point.getPlane() + ")";
+    }
+
     private void pickpocketDefault(Set<String> targets) {
-        Rs2NpcModel npc = Rs2Npc.getNpcs().filter(x -> targets.contains(x.getName())).findFirst().orElse(null);
-        pickpocketDefault(npc);
+        pickpocket(x -> targets.contains(x.getName()));
     }
 
     private boolean pickpocketHighlighted() {
@@ -242,22 +296,8 @@ public class ThievingScript extends Script {
         return true;
     }
 
-    private void pickpocketElves() {
-        Set<String> elfs = new HashSet<>(Arrays.asList(
-            "Anaire","Aranwe","Aredhel","Caranthir","Celebrian","Celegorm","Cirdan","Curufin","Earwen","Edrahil",
-            "Elenwe","Elladan","Enel","Erestor","Enerdhil","Enelye","Feanor","Findis","Finduilas","Fingolfin",
-            "Fingon","Galathil","Gelmir","Glorfindel","Guilin","Hendor","Idril","Imin","Iminye","Indis","Ingwe",
-            "Ingwion","Lenwe","Lindir","Maeglin","Mahtan","Miriel","Mithrellas","Nellas","Nerdanel","Nimloth",
-            "Oropher","Orophin","Saeros","Salgant","Tatie","Thingol","Turgon","Vaire","Goreu"
-        ));
-        pickpocketDefault(elfs);
-    }
-
     private void pickpocketVyre() {
-        Set<String> vyres = new HashSet<>(Arrays.asList(
-            "Natalidae Shadum", "Misdrievus Shadum", "Vallessia von Pitt" // add more...
-        ));
-        Rs2NpcModel vyre = Rs2Npc.getNpcs().filter(x -> vyres.contains(x.getName())).findFirst().orElse(null);
+        Rs2NpcModel vyre = Rs2Npc.getNpcs().filter(x -> VYRES.contains(x.getName())).findFirst().orElse(null);
         if (vyre == null) {
             pickpocketDefault((Rs2NpcModel) null);
             return;

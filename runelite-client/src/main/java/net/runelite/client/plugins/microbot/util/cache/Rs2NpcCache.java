@@ -8,11 +8,13 @@ import net.runelite.api.events.NpcDespawned;
 import net.runelite.api.events.NpcSpawned;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.ActorModel;
 import net.runelite.client.plugins.microbot.util.cache.strategy.entity.NpcUpdateStrategy;
 import net.runelite.client.plugins.microbot.util.cache.util.LogOutputMode;
 import net.runelite.client.plugins.microbot.util.cache.util.Rs2CacheLoggingUtils;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
 
+import java.util.Comparator;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -207,8 +209,7 @@ public class Rs2NpcCache extends Rs2Cache<Integer, Rs2NpcModel> {
      * @return Stream of NPCs in combat
      */
     public static Stream<Rs2NpcModel> getNpcsInCombat() {
-        return getAllNpcs()
-                .filter(npc -> npc.isInteracting());
+        return getAllNpcs().filter(ActorModel::isInteracting);
     }
     
     /**
@@ -219,7 +220,7 @@ public class Rs2NpcCache extends Rs2Cache<Integer, Rs2NpcModel> {
      */
     public static Optional<Rs2NpcModel> getClosestNpcByGameId(int npcId) {
         return getNpcsById(npcId)
-                .min((a, b) -> Integer.compare(a.getDistanceFromPlayer(), b.getDistanceFromPlayer()));
+                .min(Comparator.comparingInt(Rs2NpcModel::getDistanceFromPlayer));
     }
     
     /**
@@ -230,7 +231,7 @@ public class Rs2NpcCache extends Rs2Cache<Integer, Rs2NpcModel> {
      */
     public static Optional<Rs2NpcModel> getClosestNpcByName(String name) {
         return getNpcsByName(name)
-                .min((a, b) -> Integer.compare(a.getDistanceFromPlayer(), b.getDistanceFromPlayer()));
+                .min(Comparator.comparingInt(Rs2NpcModel::getDistanceFromPlayer));
     }
     
     /**
@@ -242,10 +243,7 @@ public class Rs2NpcCache extends Rs2Cache<Integer, Rs2NpcModel> {
      */
     public static Optional<Rs2NpcModel> getClosestNpcByGameId(int npcId, net.runelite.api.coords.WorldPoint anchorPoint) {
         return getNpcsById(npcId)
-                .min((a, b) -> Integer.compare(
-                    a.getWorldLocation().distanceTo(anchorPoint), 
-                    b.getWorldLocation().distanceTo(anchorPoint)
-                ));
+                .min(Comparator.comparingInt(a -> a.getWorldLocation().distanceTo(anchorPoint)));
     }
     
     /**
