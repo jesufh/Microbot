@@ -87,7 +87,9 @@ public class ThievingScript extends Script {
                             currentState = State.IDLE;
                             return;
                         }
+                        // save the Rs2NpcModel for reuse
                         if (npc == null) npc = getCurrentPickpocketNpc();
+
                         if (npc == null) {
                             Rs2Walker.walkTo(initialPlayerLocation, 0);
                             Rs2Player.waitForWalking();
@@ -100,7 +102,7 @@ public class ThievingScript extends Script {
                             if (isBeingAttackedByNpc(npc)) break;
                             if (config.shadowVeil()) castShadowVeil();
                             openCoinPouches();
-                            if (Rs2Npc.pickpocket(npc)) sleep(100, 200);
+                            if (Rs2Npc.pickpocket(npc) && autoEatAndDrop()) sleep(100, 200);
                         }
                         break;
                     case UNDER_ATTACK:
@@ -117,8 +119,7 @@ public class ThievingScript extends Script {
         return true;
     }
 
-    // --- PICKPOCKET LOGIC ---
-
+    // according to the configuration, returns the nearest Rs2NpcModel
     private Rs2NpcModel getCurrentPickpocketNpc() {
         switch (config.THIEVING_NPC()) {
             case WEALTHY_CITIZEN:
@@ -156,6 +157,7 @@ public class ThievingScript extends Script {
         return hasFood && hasDodgy;
     }
 
+    // forms a polygon according to the given Worldpoints[] and detects if the point is inside it
     private boolean isPointInPolygon(WorldPoint[] polygon, WorldPoint point) {
         int n = polygon.length;
         if (n < 3) return false;
@@ -326,11 +328,11 @@ public class ThievingScript extends Script {
         WorldPoint[] housePolygon = VYRE_HOUSES.get(npcObject.getName());
         boolean npcInside = isPointInPolygon(housePolygon, npcObject.getWorldLocation());
         boolean playerInside = isPointInPolygon(housePolygon, Rs2Player.getWorldLocation());
-        //if (isBeingAttackedByNpc(npcObject)) return false;
+
         if (playerInside && !npcInside) {
             Microbot.log("Vyre is out of his area, waiting...");
             long start = System.currentTimeMillis();
-            while (System.currentTimeMillis() - start < 3500) {
+            while (System.currentTimeMillis() - start < 8000) {
                 if (!Microbot.isLoggedIn()) return false;
                 npcInside = isPointInPolygon(housePolygon, npcObject.getWorldLocation());
                 playerInside = isPointInPolygon(housePolygon, Rs2Player.getWorldLocation());
@@ -358,8 +360,7 @@ public class ThievingScript extends Script {
         }
     }
 
-    // --- COMBAT/DEFENSE ---
-
+    // detects if the player is being attacked by any npc other than the one who is pickpocket
     public boolean isBeingAttackedByNpc(Rs2NpcModel pickpocketNpc) {
         if (!DARKMEYER_REGIONS.contains(Rs2Player.getWorldLocation().getRegionID())) return false;
 
@@ -401,6 +402,7 @@ public class ThievingScript extends Script {
         }
     }
 
+    // detects the distance between the attacking npc and the player (distance to avoid aggro), if it matches it turns off the prayer.
     private void PrayerCheckThread(Rs2NpcModel attacker, int maxDistance, Rs2PrayerEnum prayer) {
         if (prayerOffMonitorFuture != null && !prayerOffMonitorFuture.isDone()) {
             prayerOffMonitorFuture.cancel(true);
