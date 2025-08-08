@@ -16,7 +16,7 @@ public class ActionTimer {
     }
 
     public int getRemainingTime() {
-        return isSet() ? Math.max(0, (int) (time-System.currentTimeMillis())) : -1;
+        return isSet() ? (int) Math.max(0, time-System.currentTimeMillis()) : -1;
     }
 
     public void unset() {
@@ -27,7 +27,7 @@ public class ActionTimer {
         this.time = time;
     }
 
-    public void set(int minDelay, int maxDelay) {
-        this.time = System.currentTimeMillis();
+    public void set() {
+        set(0);
     }
 }

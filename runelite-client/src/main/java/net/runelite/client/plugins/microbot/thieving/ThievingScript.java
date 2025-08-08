@@ -9,6 +9,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.ObjectComposition;
 import net.runelite.client.plugins.microbot.thieving.enums.ThievingNpc;
 import net.runelite.client.plugins.microbot.util.cache.Rs2NpcCache;
+import net.runelite.client.plugins.microbot.util.coords.Rs2WorldPoint;
 import net.runelite.client.plugins.skillcalculator.skills.MagicAction;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
@@ -26,6 +27,7 @@ import net.runelite.client.plugins.microbot.util.security.Login;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 @Slf4j
@@ -43,6 +45,8 @@ public class ThievingScript extends Script {
     private volatile boolean underAttack;
 
     private long lastShadowVeil = 0;
+
+    private static final int DOOR_CHECK_RADIUS = 10;
     private static final ActionTimer DOOR_TIMER = new ActionTimer();
     private final long[] doorCloseTime = new long[3];
     private int doorCloseIndex = 0;
@@ -58,32 +62,40 @@ public class ThievingScript extends Script {
         this.plugin = plugin;
     }
 
+    private Predicate<Rs2NpcModel> validateName(Predicate<String> stringPredicate) {
+        return npc -> {
+            if (npc == null) return false;
+            final String name = npc.getName();
+            if (name == null) return false;
+            return stringPredicate.test(name);
+        };
+    }
+
     private Predicate<Rs2NpcModel> getThievingNpcFilter() {
         Predicate<Rs2NpcModel> filter = npc -> true;
         if (net.runelite.client.plugins.npchighlight.NpcIndicatorsPlugin.getHighlightedNpcs().isEmpty()) {
-            switch (config.THIEVING_NPC()) {
+            final ThievingNpc finalNpc = config.THIEVING_NPC();
+            if (finalNpc == null) {
+                log.error("Config Thieving NPC is null");
+                return filter;
+            }
+            switch (finalNpc) {
                 case VYRES:
-                    filter = npc -> ThievingData.VYRES.contains(npc.getName());
+                    filter = validateName(ThievingData.VYRES::contains);
                     break;
                 case ARDOUGNE_KNIGHT:
-                    filter = npc -> {
-                        final String name = npc.getName();
-                        return name != null && name.toLowerCase().contains("knight of ardougne");
-                    };
+                    filter = validateName("knight of ardougne"::equalsIgnoreCase);
                     if (config.ardougneAreaCheck()) filter = filter.and(npc -> ThievingData.ARDOUGNE_AREA.contains(npc.getWorldLocation()));
                     break;
                 case ELVES:
-                    filter = npc -> ThievingData.ELVES.contains(npc.getName());
+                    filter = validateName(ThievingData.ELVES::contains);
                     break;
                 case WEALTHY_CITIZEN:
-                    filter = npc -> "Wealthy citizen".equalsIgnoreCase(npc.getName());
+                    filter = validateName("Wealthy citizen"::equalsIgnoreCase);
                     filter = filter.and(npc -> npc != null && npc.isInteracting() && npc.getInteracting() != null);
                     break;
                 default:
-                    filter = npc -> {
-                        final String name = npc.getName();
-                        return name != null && name.toLowerCase().contains(config.THIEVING_NPC().getName());
-                    };
+                    filter = validateName(name -> name.toLowerCase().contains(finalNpc.getName()));
                     break;
             }
         }
@@ -125,9 +137,11 @@ public class ThievingScript extends Script {
 
         if (Rs2Inventory.isFull()) return State.DROP;
 
+        if (isNpcNull(thievingNpc) && (thievingNpc = getThievingNpc()) == null) return State.WALK_TO_START;
+
         if (config.THIEVING_NPC() == ThievingNpc.VYRES) {
             // delayed door closing logic
-            List<TileObject> doors = getDoors(Rs2Player.getWorldLocation(), 4);
+            List<TileObject> doors = getDoors(Rs2Player.getWorldLocation(), DOOR_CHECK_RADIUS);
             if (doors.isEmpty()) {
                 DOOR_TIMER.unset();
             } else if (DOOR_TIMER.isSet()) {
@@ -150,8 +164,6 @@ public class ThievingScript extends Script {
         }
 
         if (shouldOpenCoinPouches()) return State.COIN_POUCHES;
-
-        if (isNpcNull(thievingNpc) && (thievingNpc = getThievingNpc()) == null) return State.WALK_TO_START;
 
         if (config.THIEVING_NPC() == ThievingNpc.VYRES) {
             final WorldPoint[] housePolygon = ThievingData.VYRE_HOUSES.get(thievingNpc.getName());
@@ -209,7 +221,7 @@ public class ThievingScript extends Script {
                 Rs2Inventory.interact("coin pouch", "Open-all");
                 return;
             case WALK_TO_START:
-                Rs2Walker.walkTo(initialPlayerLocation, 0);
+                Rs2Walker.walkTo(initialPlayerLocation, 1);
                 Rs2Player.waitForWalking();
                 return;
             case SHADOW_VEIL:
@@ -217,15 +229,25 @@ public class ThievingScript extends Script {
                 return;
             case CLOSE_DOOR:
                 if (isNpcNull(thievingNpc)) return;
-                if (isPointInPolygon(ThievingData.VYRE_HOUSES.get(thievingNpc.getName()), Rs2Player.getWorldLocation())) {
-                    if (closeNearbyDoor(4)) DOOR_TIMER.unset();
+                final String name = thievingNpc.getName();
+                final WorldPoint[] house = ThievingData.VYRE_HOUSES.get(name);
+                final WorldPoint myLoc = Rs2Player.getWorldLocation();
+                if (isPointInPolygon(house, myLoc)) {
+                    log.info("Closing door {} in {} house", toString(myLoc), name);
+                    if (closeNearbyDoor(DOOR_CHECK_RADIUS)) DOOR_TIMER.unset();
                 } else if (isPointInPolygon(ThievingData.VYRE_HOUSES.get(thievingNpc.getName()), thievingNpc.getWorldLocation())) {
                     Rs2Walker.walkTo(thievingNpc.getWorldLocation());
                 }
                 return;
             case PICKPOCKET:
-                if (equipSet(ThievingData.ROGUE_SET)) {
-                    log.info("Equipped rogue set");
+                if (!isWearing(ThievingData.ROGUE_SET)) {
+                    // only equip if we are safely in the house w/ the npc
+                    if ((new Rs2WorldPoint(Rs2Player.getWorldLocation())).distanceToPath(thievingNpc.getWorldLocation()) < Integer.MAX_VALUE) {
+                        if (equip(ThievingData.ROGUE_SET)) {
+                            log.info("Equipped rogue set");
+                        }
+                    }
+                    DOOR_TIMER.set();
                     return;
                 }
 
@@ -384,17 +406,34 @@ public class ThievingScript extends Script {
     }
 
     private List<TileObject> getDoors(WorldPoint wp, int radius) {
+        if (wp == null) return Collections.emptyList();
+        final Rs2WorldPoint rs2Wp = new Rs2WorldPoint(wp);
         // this take 1.5s off client thread
         return Microbot.getClientThread().runOnClientThreadOptional(() -> Rs2GameObject.getAll(
                 o -> {
                     ObjectComposition comp = Rs2GameObject.convertToObjectComposition(o);
-                    return comp != null && Arrays.asList(comp.getActions()).contains("Close");
+                    if (comp == null || !Arrays.asList(comp.getActions()).contains("Close")) return false;
+
+                    final WorldPoint objWp = o.getWorldLocation();
+                    return rs2Wp.distanceToPath(objWp) < Integer.MAX_VALUE;
                 }, wp, radius
         )).orElse(Collections.emptyList());
     };
 
     private boolean closeNearbyDoor(int radius) {
-        for (TileObject door : getDoors(Rs2Player.getWorldLocation(), radius)) {
+        List<TileObject> doors;
+        int doorCount = 0;
+        while (!(doors = getDoors(Rs2Player.getWorldLocation(), radius)).isEmpty()) {
+            if (doorCount >= 3) {
+                log.error("Closing third door maybe we should hop?");
+                return false;
+            }
+            final WorldPoint myLoc = Rs2Player.getWorldLocation();
+            if (myLoc == null) return false;
+            final TileObject door = doors.stream()
+                    .min(Comparator.comparingInt(d -> d.getWorldLocation().distanceTo(myLoc)))
+                    .orElseThrow();
+
             final WorldPoint doorWp = door.getWorldLocation();
             if (!Rs2GameObject.interact(door, "Close")) return false;
             if (door.getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) > 1) {
@@ -408,30 +447,52 @@ public class ThievingScript extends Script {
             }
             if (Rs2Player.isStunned()) return false;
             log.info("Closed door @ {}", toString(doorWp));
+            doorCount++;
         }
         return true;
     }
 
-    private boolean equipSet(Set<String> set) {
-        boolean changed = false;
-        for (String item : set) {
-            if (!Rs2Equipment.isWearing(item)) {
-                if (Rs2Inventory.contains(item)) {
-                    Rs2Inventory.wear(item);
-                    Rs2Inventory.waitForInventoryChanges(3000);
-                    changed = true;
-                } else if (Rs2Bank.hasBankItem(item)) {
-                    if (Rs2Player.getWorldLocation().getRegionID() == DARKMEYER_REGION) {
-                        Rs2Bank.withdrawItem(item);
-                    } else {
-                        Rs2Bank.withdrawAndEquip(item);
-                    }
-                    Rs2Inventory.waitForInventoryChanges(3000);
-                    changed = true;
-                }
-            }
+    private boolean repeatedAction(Runnable action, BooleanSupplier check, int maxTries) {
+        for (int i = 0; i < maxTries; i++) {
+            if (check.getAsBoolean()) return true;
+            action.run();
+            sleepUntil(check, 1_200);
         }
-        return changed;
+        return false;
+    }
+
+    private boolean equip(String item) {
+        if (Rs2Equipment.isWearing(item)) return true;
+        final boolean success;
+        if (Rs2Inventory.contains(item)) {
+            success = repeatedAction(() -> Rs2Inventory.wear(item), () -> Rs2Equipment.isWearing(item), 3);
+            if (!success) log.error("Failed to equip {}", item);
+        } else if (Rs2Bank.hasBankItem(item)) {
+            if (Rs2Player.getWorldLocation().getRegionID() == DARKMEYER_REGION) {
+                success = repeatedAction(() -> Rs2Bank.withdrawItem(item), () -> Rs2Inventory.contains(item), 3);
+            } else {
+                success = repeatedAction(() -> Rs2Bank.withdrawAndEquip(item), () -> Rs2Equipment.isWearing(item), 3);
+            }
+            if (!success) log.error("Could not withdraw item to equip {}", item);
+        } else {
+            success = false;
+            log.error("Could not find item to equip {}", item);
+        }
+        return success;
+    }
+
+    private boolean isWearing(Set<String> set) {
+        for (String item : set) {
+            if (!Rs2Equipment.isWearing(item)) return false;
+        }
+        return true;
+    }
+
+    private boolean equip(Set<String> set) {
+        for (String item : set) {
+            if (!equip(item)) return false;
+        }
+        return true;
     }
 
     private String[] getExclusions() {
@@ -452,7 +513,12 @@ public class ThievingScript extends Script {
         } else {
             log.info("Not Near Hallowed");
             bank = Rs2Bank.getNearestBank();
-            if (bank == BankLocation.DARKMEYER) equipSet(ThievingData.VYRE_SET);
+            if (bank == BankLocation.DARKMEYER) {
+                if (!equip(ThievingData.VYRE_SET)) {
+                    log.error("Did not equip vyre set cannot go to darkmeyer bank");
+                    return;
+                }
+            }
         }
 
         boolean opened = Rs2Bank.isNearBank(bank, 8) ? Rs2Bank.openBank() : Rs2Bank.walkToBankAndUseBank(bank);
@@ -531,7 +597,7 @@ public class ThievingScript extends Script {
             }
         }
 
-        equipSet(ThievingData.ROGUE_SET);
+        equip(ThievingData.ROGUE_SET);
         Rs2Bank.closeBank();
         sleepUntil(() -> !Rs2Bank.isOpen());
 
@@ -542,14 +608,8 @@ public class ThievingScript extends Script {
 
         if (Rs2Walker.walkTo(initialPlayerLocation)) {
             sleepUntil(() -> !Rs2Player.isMoving(), 1_200);
-            if (config.THIEVING_NPC() == ThievingNpc.VYRES) {
-                thievingNpc = getThievingNpc();
-                if (thievingNpc != null) {
-                    if (isPointInPolygon(ThievingData.VYRE_HOUSES.get(thievingNpc.getName()), thievingNpc.getWorldLocation()))
-                        closeNearbyDoor(4);
-                }
-            }
         }
+        DOOR_TIMER.set();
     }
 
     private void dropAllExceptImportant() {

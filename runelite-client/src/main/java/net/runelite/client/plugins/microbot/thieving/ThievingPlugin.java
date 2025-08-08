@@ -40,7 +40,7 @@ public class ThievingPlugin extends Plugin {
     @Getter
     private ThievingScript thievingScript;
 
-    public static String version = "1.6.6";
+    public static String version = "1.6.7";
     private int startXp = 0;
 	@Getter
 	private int maxCoinPouch;
@@ -63,6 +63,7 @@ public class ThievingPlugin extends Plugin {
     }
 
     public int xpGained() {
+        if (startXp == 0) startXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
         final int currentXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
         return currentXp - startXp;
     }

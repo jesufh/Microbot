@@ -5,6 +5,8 @@ import lombok.Getter;
 import net.runelite.api.NPC;
 import net.runelite.api.NPCComposition;
 import net.runelite.api.NpcOverrides;
+import net.runelite.api.Player;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.ActorModel;
@@ -100,8 +102,16 @@ public class Rs2NpcModel extends ActorModel implements NPC
 	 */
 	public int getDistanceFromPlayer() {
 		return Microbot.getClientThread().runOnClientThreadOptional(() -> {
-			return this.getLocalLocation().distanceTo(
-					Microbot.getClient().getLocalPlayer().getLocalLocation());
+			final LocalPoint localPoint = this.getLocalLocation();
+			if (localPoint == null) return Integer.MAX_VALUE;
+
+			final Player player = Microbot.getClient().getLocalPlayer();
+			if (player == null) return Integer.MAX_VALUE;
+
+			final LocalPoint playerPoint = player.getLocalLocation();
+			if (playerPoint == null) return Integer.MAX_VALUE;
+
+			return localPoint.distanceTo(playerPoint);
 		}).orElse(Integer.MAX_VALUE);
 	}
 
