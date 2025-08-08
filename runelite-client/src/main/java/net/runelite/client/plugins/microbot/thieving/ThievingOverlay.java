@@ -59,6 +59,13 @@ public class ThievingOverlay extends OverlayPanel {
 
             panelComponent.getChildren().add(
                     LineComponent.builder()
+                            .left("Under Attack:")
+                            .right(plugin.getThievingScript().isUnderAttack() + "")
+                            .build()
+            );
+
+            panelComponent.getChildren().add(
+                    LineComponent.builder()
                             .left("Stunned:")
                             .right(Rs2Player.isStunned() + "")
                             .build()

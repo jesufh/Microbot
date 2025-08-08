@@ -11,5 +11,6 @@ public enum State {
     STUNNED,
     CLOSE_DOOR,
     COIN_POUCHES,
-    WALK_TO_START
+    WALK_TO_START,
+    SLEEPING
 }

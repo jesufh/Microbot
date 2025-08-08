@@ -37,6 +37,7 @@ public class ThievingPlugin extends Plugin {
     @Inject
     private ThievingOverlay thievingOverlay;
     @Inject
+    @Getter
     private ThievingScript thievingScript;
 
     public static String version = "1.6.6";
@@ -55,13 +56,14 @@ public class ThievingPlugin extends Plugin {
     }
 
     protected void shutDown() {
-		maxCoinPouch = 0;
         thievingScript.shutdown();
         overlayManager.remove(thievingOverlay);
+        startXp = 0;
+		maxCoinPouch = 0;
     }
 
     public int xpGained() {
-        int currentXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
+        final int currentXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
         return currentXp - startXp;
     }
 
