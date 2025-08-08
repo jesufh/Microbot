@@ -26,26 +26,11 @@ public final class ThievingData {
     );
 
     public static final Map<String, WorldPoint[]> VYRE_HOUSES = Map.of(
-            "Vallessia von Pitt", new WorldPoint[]{
-                    new WorldPoint(3661, 3378, 0),
-                    new WorldPoint(3664, 3378, 0),
-                    new WorldPoint(3664, 3376, 0),
-                    new WorldPoint(3667, 3376, 0),
-                    new WorldPoint(3667, 3381, 0),
-                    new WorldPoint(3661, 3382, 0)
-            },
-            "Misdrievus Shadum", new WorldPoint[]{
-                    new WorldPoint(3612, 3347, 0),
-                    new WorldPoint(3607, 3347, 0),
-                    new WorldPoint(3607, 3343, 0),
-                    new WorldPoint(3612, 3343, 0)
-            },
-            "Natalidae Shadum", new WorldPoint[]{
-                    new WorldPoint(3612, 3343, 0),
-                    new WorldPoint(3607, 3343, 0),
-                    new WorldPoint(3607, 3336, 0),
-                    new WorldPoint(3612, 3336, 0)
-            }
+            "Vallessia von Pitt", new WorldPoint[]{new WorldPoint(3661, 3378, 0), new WorldPoint(3661, 3381, 0), new WorldPoint(3667, 3381, 0), new WorldPoint(3667, 3376, 0), new WorldPoint(3664, 3376, 0), new WorldPoint(3664, 3378, 0)},
+            "Misdrievus Shadum", new WorldPoint[]{new WorldPoint(3608, 3346, 0), new WorldPoint(3611, 3346, 0), new WorldPoint(3611, 3343, 0), new WorldPoint(3608, 3343, 0)},
+            "Natalidae Shadum", new WorldPoint[]{new WorldPoint(3608, 3342, 0), new WorldPoint(3611, 3342, 0), new WorldPoint(3611, 3337, 0), new WorldPoint(3608, 3337, 0)},
+            "Vonnetta Varnis", new WorldPoint[]{new WorldPoint(3640, 3384, 0), new WorldPoint(3640, 3388, 0), new WorldPoint(3645, 3388, 0), new WorldPoint(3645, 3384, 0)},
+            "Nakasa Jovkai", new WorldPoint[]{new WorldPoint(3608, 3322, 0), new WorldPoint(3608, 3327, 0), new WorldPoint(3612, 3327, 0), new WorldPoint(3612, 3322, 0)}
             // add more...
     );
 
@@ -56,5 +41,5 @@ public final class ThievingData {
             "Nellas","Nerdanel","Nimloth", "Oropher","Orophin","Saeros","Salgant","Tatie","Thingol","Turgon","Vaire",
             "Goreu");
 
-    public static final Set<String> VYRES = Set.of("Natalidae Shadum", "Misdrievus Shadum", "Vallessia von Pitt"); // add more...
+    public static final Set<String> VYRES = VYRE_HOUSES.keySet();
 }
