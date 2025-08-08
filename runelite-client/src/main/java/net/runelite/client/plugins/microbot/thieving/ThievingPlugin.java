@@ -83,7 +83,7 @@ public class ThievingPlugin extends Plugin {
 		return thievingScript.getRunTime();
 	}
 
-    public String getState() {
-        return String.valueOf(thievingScript.currentState);
+    public State getState() {
+        return thievingScript.currentState;
     }
 }

@@ -156,6 +156,13 @@ public class ThievingScript extends Script {
         if (config.THIEVING_NPC() == ThievingNpc.VYRES) {
             final WorldPoint[] housePolygon = ThievingData.VYRE_HOUSES.get(thievingNpc.getName());
 
+            if (Rs2NpcCache.getAllNpcs()
+                    .filter(Rs2NpcModel.matches(true, "Vyrewatch Sentinel"))
+                    .anyMatch(npc -> isPointInPolygon(housePolygon, npc.getWorldLocation()))) {
+                log.info("Vyrewatch Sentinel inside house");
+                return State.HOP;
+            }
+
             if (!isPointInPolygon(housePolygon, thievingNpc.getWorldLocation())) {
                 if (!sleepUntil(() -> isPointInPolygon(housePolygon, thievingNpc.getWorldLocation()), 8_000 + (int)(Math.random() * 4_000))) {
                     log.info("Vyre outside house @ {}", toString(thievingNpc.getWorldLocation()));

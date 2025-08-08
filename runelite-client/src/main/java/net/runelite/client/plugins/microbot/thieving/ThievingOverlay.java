@@ -53,7 +53,7 @@ public class ThievingOverlay extends OverlayPanel {
             panelComponent.getChildren().add(
                     LineComponent.builder()
                             .left("STATE:")
-                            .right(plugin.getState())
+                            .right(plugin.getState().toString())
                             .build()
             );
 
@@ -84,7 +84,7 @@ public class ThievingOverlay extends OverlayPanel {
                 panelComponent.getChildren().add(
                         LineComponent.builder()
                                 .left("Door:")
-                                .right(getDoorString(ThievingScript.getCloseDoorTime()))
+                                .right(plugin.getState() == State.BANK ? "Unknown" : getDoorString(ThievingScript.getCloseDoorTime()))
                                 .build()
                 );
             }
