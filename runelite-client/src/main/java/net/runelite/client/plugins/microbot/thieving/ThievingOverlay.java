@@ -4,6 +4,7 @@ import java.time.Duration;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.thieving.enums.ThievingNpc;
 import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
@@ -49,14 +50,19 @@ public class ThievingOverlay extends OverlayPanel {
                             .build()
             );
 
-            if (plugin.getConfig().THIEVING_NPC() == ThievingNpc.VYRES) {
-                panelComponent.getChildren().add(
-                        LineComponent.builder()
-                                .left("Door:")
-                                .right(getDoorString(ThievingScript.getCloseDoorTime()))
-                                .build()
-                );
-            }
+            panelComponent.getChildren().add(
+                    LineComponent.builder()
+                            .left("STATE:")
+                            .right(plugin.getState())
+                            .build()
+            );
+
+            panelComponent.getChildren().add(
+                    LineComponent.builder()
+                            .left("Stunned:")
+                            .right(Rs2Player.isStunned() + "")
+                            .build()
+            );
 
             if (plugin.getConfig().shadowVeil()) {
                 panelComponent.getChildren().add(
@@ -67,12 +73,14 @@ public class ThievingOverlay extends OverlayPanel {
                 );
             }
 
-            panelComponent.getChildren().add(
-                    LineComponent.builder()
-                            .left("STATE:")
-                            .right(plugin.getState())
-                            .build()
-            );
+            if (plugin.getConfig().THIEVING_NPC() == ThievingNpc.VYRES) {
+                panelComponent.getChildren().add(
+                        LineComponent.builder()
+                                .left("Door:")
+                                .right(getDoorString(ThievingScript.getCloseDoorTime()))
+                                .build()
+                );
+            }
 
             panelComponent.getChildren().add(
                     LineComponent.builder()
