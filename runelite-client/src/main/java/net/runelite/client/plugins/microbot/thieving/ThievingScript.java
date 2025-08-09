@@ -465,15 +465,13 @@ public class ThievingScript extends Script {
         if (Rs2Equipment.isWearing(item)) return true;
         final boolean success;
         if (Rs2Inventory.contains(item)) {
+            if (Rs2Player.getWorldLocation().getRegionID() == DARKMEYER_REGION) return true;
             success = repeatedAction(() -> Rs2Inventory.wear(item), () -> Rs2Equipment.isWearing(item), 3);
             if (!success) log.error("Failed to equip {}", item);
         } else if (Rs2Bank.hasBankItem(item)) {
-            if (Rs2Player.getWorldLocation().getRegionID() == DARKMEYER_REGION) {
-                success = repeatedAction(() -> Rs2Bank.withdrawItem(item), () -> Rs2Inventory.contains(item), 3);
-            } else {
-                success = repeatedAction(() -> Rs2Bank.withdrawAndEquip(item), () -> Rs2Equipment.isWearing(item), 3);
-            }
+            success = repeatedAction(() -> Rs2Bank.withdrawItem(item), () -> Rs2Inventory.contains(item), 3);
             if (!success) log.error("Could not withdraw item to equip {}", item);
+            else return equip(item);
         } else {
             success = false;
             log.error("Could not find item to equip {}", item);
@@ -496,13 +494,26 @@ public class ThievingScript extends Script {
     }
 
     private String[] getExclusions() {
-        ArrayList<String> exclusions = new ArrayList<>();
+        final ArrayList<String> exclusions = new ArrayList<>(ThievingData.ROGUE_SET);
+        if (config.THIEVING_NPC() == ThievingNpc.VYRES) exclusions.addAll(ThievingData.VYRE_SET);
+        exclusions.add("Coin pouch");
         if (config.shadowVeil()) {
             exclusions.add("Cosmic rune");
-            exclusions.add("Earth rune");
-            exclusions.add("Fire rune");
+            if (!Rs2Equipment.isWearing("Lava battlestaff")) {
+                exclusions.add("Earth rune");
+                exclusions.add("Fire rune");
+            }
         }
+        if (config.dodgyNecklaceAmount() > 0) exclusions.add("Dodgy necklace");
+        if (config.useFood()) exclusions.add(config.food().getName());
         return exclusions.toArray(String[]::new);
+    }
+
+    private boolean getInventoryAmount(String name, int amount, boolean exact) {
+        final int deficit = amount - Rs2Inventory.itemQuantity(name, exact);
+        if (deficit == 0) return true;
+        if (deficit > 0) return Rs2Bank.hasBankItem(name, deficit, exact) && Rs2Bank.withdrawX(name, deficit, exact);
+        return Rs2Bank.depositX(name, deficit);
     }
 
     private void bankAndEquip() {
@@ -525,8 +536,8 @@ public class ThievingScript extends Script {
         if (!opened || !Rs2Bank.isOpen()) return;
         Rs2Bank.depositAllExcept(getExclusions());
 
-        boolean successfullyWithdrawFood = Rs2Bank.withdrawX(true, config.food().getName(), config.foodAmount(), true);
-        Rs2Inventory.waitForInventoryChanges(3000);
+        boolean successfullyWithdrawFood = getInventoryAmount(config.food().getName(), config.foodAmount(), true);
+        Rs2Inventory.waitForInventoryChanges(1_500);
 
         if (!successfullyWithdrawFood) {
             Microbot.showMessage("No " + config.food().getName() + " found in bank.");
@@ -534,29 +545,21 @@ public class ThievingScript extends Script {
             return;
         }
 
-        boolean ateFood = false;
         if (config.eatFullHpBank()) {
+            boolean ateFood = false;
             while (!Rs2Player.isFullHealth() && Rs2Player.useFood()) {
                 Rs2Player.waitForAnimation();
                 ateFood = true;
             }
 
             if (ateFood) {
-                Set<String> keep = new HashSet<>();
-                Rs2Inventory.getInventoryFood().forEach(food -> keep.add(food.getName()));
-                Rs2Bank.depositAll(x -> !keep.contains(x.getName()));
-
-                int foodActual = Rs2Inventory.getInventoryFood().size();
-                int foodMiss = config.foodAmount() - foodActual;
-                if (foodMiss > 0) {
-                    Rs2Bank.withdrawX(false, config.food().getName(), foodMiss, true);
-                    Rs2Inventory.waitForInventoryChanges(3000);
-                }
+                bankAndEquip();
+                return;
             }
         }
 
-        boolean successDodgy = Rs2Bank.withdrawDeficit("Dodgy necklace", config.dodgyNecklaceAmount());
-        Rs2Inventory.waitForInventoryChanges(3000);
+        boolean successDodgy = getInventoryAmount("Dodgy necklace", config.dodgyNecklaceAmount(), true);
+        Rs2Inventory.waitForInventoryChanges(1_500);
 
         if (!successDodgy) {
             Microbot.showMessage("No Dodgy necklace found in bank.");
@@ -570,12 +573,12 @@ public class ThievingScript extends Script {
                         !(Rs2Inventory.contains("Earth rune") && Rs2Inventory.contains("Fire rune"))) {
                     if (Rs2Bank.hasItem("Lava battlestaff")) {
                         Rs2Bank.withdrawItem("Lava battlestaff");
-                        Rs2Inventory.waitForInventoryChanges(3_000);
+                        Rs2Inventory.waitForInventoryChanges(1_500);
                     } else if (Rs2Bank.hasItem("Earth rune") && Rs2Bank.hasItem("Fire rune")) {
                         Rs2Bank.withdrawAll(true, "Fire rune", true);
-                        Rs2Inventory.waitForInventoryChanges(3000);
+                        Rs2Inventory.waitForInventoryChanges(1_500);
                         Rs2Bank.withdrawAll(true, "Earth rune", true);
-                        Rs2Inventory.waitForInventoryChanges(3000);
+                        Rs2Inventory.waitForInventoryChanges(1_500);
                     } else {
                         Microbot.showMessage("No Lava battlestaff and runes (Earth, Fire) found in bank.");
                         shutdown();
@@ -584,12 +587,12 @@ public class ThievingScript extends Script {
                 }
                 if (Rs2Inventory.contains("Lava battlestaff")) {
                     Rs2Inventory.wear("Lava battlestaff");
-                    Rs2Inventory.waitForInventoryChanges(3000);
+                    Rs2Inventory.waitForInventoryChanges(1_500);
                 }
             }
 
             Rs2Bank.withdrawAll(true, "Cosmic rune", true);
-            Rs2Inventory.waitForInventoryChanges(3000);
+            Rs2Inventory.waitForInventoryChanges(1_500);
             if (!Rs2Inventory.hasItem("Cosmic rune")) {
                 Microbot.showMessage("No Cosmic runes found.");
                 shutdown();
@@ -599,7 +602,6 @@ public class ThievingScript extends Script {
 
         equip(ThievingData.ROGUE_SET);
         Rs2Bank.closeBank();
-        sleepUntil(() -> !Rs2Bank.isOpen());
 
         if (underAttack) {
             underAttack = false;
