@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 
 public final class ThievingData {
+    public static final WorldPoint NULL_WORLD_POINT = new WorldPoint(-1,-1,-1);
     public static final WorldPoint OUTSIDE_HALLOWED_BANK = new WorldPoint(3654,3384,0);
 
     public static final WorldArea ARDOUGNE_AREA = new WorldArea(2649, 3280, 7, 8, 0);
@@ -25,7 +26,7 @@ public final class ThievingData {
             "Rogue gloves"
     );
 
-    public static final Map<String, WorldPoint[]> VYRE_HOUSES = Map.of(
+    private static final Map<String, WorldPoint[]> VYRE_HOUSES = Map.of(
             "Vallessia von Pitt", new WorldPoint[]{new WorldPoint(3661, 3378, 0), new WorldPoint(3661, 3381, 0), new WorldPoint(3667, 3381, 0), new WorldPoint(3667, 3376, 0), new WorldPoint(3664, 3376, 0), new WorldPoint(3664, 3378, 0)},
             "Misdrievus Shadum", new WorldPoint[]{new WorldPoint(3608, 3346, 0), new WorldPoint(3611, 3346, 0), new WorldPoint(3611, 3343, 0), new WorldPoint(3608, 3343, 0)},
             "Natalidae Shadum", new WorldPoint[]{new WorldPoint(3608, 3342, 0), new WorldPoint(3611, 3342, 0), new WorldPoint(3611, 3337, 0), new WorldPoint(3608, 3337, 0)},
@@ -33,6 +34,41 @@ public final class ThievingData {
             "Nakasa Jovkai", new WorldPoint[]{new WorldPoint(3608, 3322, 0), new WorldPoint(3608, 3327, 0), new WorldPoint(3612, 3327, 0), new WorldPoint(3612, 3322, 0)}
             // add more...
     );
+
+    public static WorldPoint[] getVyreHouse(String vyreName) {
+        if (vyreName == null) return null;
+        final WorldPoint[] house = VYRE_HOUSES.get(vyreName);
+        if (house == null) throw new IllegalArgumentException("Vyre House is not defined for " + vyreName);
+        return house;
+    }
+
+    private static final Map<String, WorldPoint> VYRE_ESCAPE = Map.of(
+            "Vallessia von Pitt", NULL_WORLD_POINT,
+            "Misdrievus Shadum", NULL_WORLD_POINT,
+            "Natalidae Shadum", NULL_WORLD_POINT,
+            "Vonnetta Varnis", NULL_WORLD_POINT,
+            "Nakasa Jovkai", new WorldPoint(3611, 3323, 1) // upstairs
+            // add more...
+    );
+
+    public static WorldPoint getVyreEscape(String vyreName) {
+        assert VYRE_ESCAPE.containsKey(vyreName);
+        return VYRE_ESCAPE.getOrDefault(vyreName, NULL_WORLD_POINT);
+    }
+
+    private static final Map<String, WorldPoint> VYRE_POSITION = Map.of(
+            "Vallessia von Pitt", NULL_WORLD_POINT,
+            "Misdrievus Shadum", NULL_WORLD_POINT,
+            "Natalidae Shadum", NULL_WORLD_POINT,
+            "Vonnetta Varnis", NULL_WORLD_POINT,
+            "Nakasa Jovkai", NULL_WORLD_POINT
+            // add more...
+    );
+
+    public static WorldPoint getVyrePosition(String vyreName) {
+        assert VYRE_HOUSES.containsKey(vyreName);
+        return VYRE_POSITION.getOrDefault(vyreName, NULL_WORLD_POINT);
+    }
 
     public static final Set<String> ELVES = Set.of("Anaire","Aranwe","Aredhel","Caranthir","Celebrian","Celegorm",
             "Cirdan","Curufin","Earwen","Edrahil", "Elenwe","Elladan","Enel","Erestor","Enerdhil","Enelye","Feanor",

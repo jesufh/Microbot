@@ -128,7 +128,7 @@ public class ThievingScript extends Script {
     private State getCurrentState() {
         if (underAttack || isBeingAttackByNpc()) {
             if (!underAttack) underAttack = true;
-            return State.BANK;
+            return State.ESCAPE;
         }
 
         if (!hasReqs()) return State.BANK;
@@ -166,7 +166,7 @@ public class ThievingScript extends Script {
         if (shouldOpenCoinPouches()) return State.COIN_POUCHES;
 
         if (config.THIEVING_NPC() == ThievingNpc.VYRES) {
-            final WorldPoint[] housePolygon = ThievingData.VYRE_HOUSES.get(thievingNpc.getName());
+            final WorldPoint[] housePolygon = ThievingData.getVyreHouse(thievingNpc.getName());
 
             if (Rs2NpcCache.getAllNpcs()
                     .filter(Rs2NpcModel.matches(true, "Vyrewatch Sentinel"))
@@ -196,6 +196,7 @@ public class ThievingScript extends Script {
         if (initialPlayerLocation == null) initialPlayerLocation = Rs2Player.getWorldLocation();
 
         currentState = getCurrentState();
+        if (currentState != State.PICKPOCKET) log.info("State {}", currentState);
 
         if (Rs2Player.isStunned() && (currentState != State.PICKPOCKET || !config.ignoreStuns())) {
             currentState = State.STUNNED;
@@ -204,6 +205,28 @@ public class ThievingScript extends Script {
         }
 
         switch(currentState) {
+            case ESCAPE:
+                if (thievingNpc == null) thievingNpc = getThievingNpc();
+                final WorldPoint escape = thievingNpc == null ? ThievingData.NULL_WORLD_POINT : ThievingData.getVyreEscape(thievingNpc.getName());
+                if (escape != ThievingData.NULL_WORLD_POINT) {
+                    log.info("Escaping to {}", toString(escape));
+                    Rs2Walker.walkTo(escape, 5);
+                    final WorldPoint myLoc = Rs2Player.getWorldLocation();
+                    if (myLoc != null && myLoc.distanceTo(escape) < 10) {
+                        if (underAttack) {
+                            underAttack = false;
+                            hopWorld();
+                        }
+
+                        if (Rs2Walker.walkTo(initialPlayerLocation)) {
+                            sleepUntil(() -> !Rs2Player.isMoving(), 1_200);
+                        }
+                        DOOR_TIMER.set();
+                        return;
+                    } else {
+                        log.error("Failed to use escape route defaulting to bank escape");
+                    }
+                }
             case BANK:
                 bankAndEquip();
                 return;
@@ -230,12 +253,12 @@ public class ThievingScript extends Script {
             case CLOSE_DOOR:
                 if (isNpcNull(thievingNpc)) return;
                 final String name = thievingNpc.getName();
-                final WorldPoint[] house = ThievingData.VYRE_HOUSES.get(name);
+                final WorldPoint[] house = ThievingData.getVyreHouse(name);
                 final WorldPoint myLoc = Rs2Player.getWorldLocation();
                 if (isPointInPolygon(house, myLoc)) {
                     log.info("Closing door {} in {} house", toString(myLoc), name);
                     if (closeNearbyDoor(DOOR_CHECK_RADIUS)) DOOR_TIMER.unset();
-                } else if (isPointInPolygon(ThievingData.VYRE_HOUSES.get(thievingNpc.getName()), thievingNpc.getWorldLocation())) {
+                } else if (isPointInPolygon(ThievingData.getVyreHouse(thievingNpc.getName()), thievingNpc.getWorldLocation())) {
                     Rs2Walker.walkTo(thievingNpc.getWorldLocation());
                 }
                 return;

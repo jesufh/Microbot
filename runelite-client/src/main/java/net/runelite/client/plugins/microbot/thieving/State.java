@@ -3,6 +3,7 @@ package net.runelite.client.plugins.microbot.thieving;
 public enum State {
     IDLE,
     BANK,
+    ESCAPE,
     EAT,
     DROP,
     SHADOW_VEIL,
