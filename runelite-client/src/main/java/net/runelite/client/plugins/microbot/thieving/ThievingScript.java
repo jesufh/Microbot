@@ -359,7 +359,7 @@ public class ThievingScript extends Script {
                 var highlighted = net.runelite.client.plugins.npchighlight.NpcIndicatorsPlugin.getHighlightedNpcs();
                 if (highlighted.isEmpty()) {
                     if (isNpcNull(thievingNpc)) return;
-                    Rs2Npc.pickpocket(thievingNpc);
+                    if (!Rs2Npc.pickpocket(thievingNpc)) thievingNpc = null;
                 } else {
                     Rs2Npc.pickpocket(highlighted);
                 }
@@ -380,6 +380,7 @@ public class ThievingScript extends Script {
                 loop();
             } catch (Exception ex) {
                 Microbot.logStackTrace(getClass().getSimpleName(), ex);
+                thievingNpc = null;
             }
         }, 0, 20, TimeUnit.MILLISECONDS);
         return true;
