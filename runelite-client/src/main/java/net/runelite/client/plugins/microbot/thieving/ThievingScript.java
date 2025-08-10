@@ -122,14 +122,19 @@ public class ThievingScript extends Script {
         final Rs2NpcModel[] npcs = Rs2NpcCache.getAllNpcs().toArray(Rs2NpcModel[]::new);
         if (npcs.length == 0) return false;
 
+        final Predicate<Rs2NpcModel> customFilter = config.THIEVING_NPC() == ThievingNpc.VYRES ?
+                Rs2NpcModel.matches(true, "vyrewatch sentinel") :
+                npc -> true; // TODO: fix for random event npcs
+
         return Microbot.getClientThread().runOnClientThreadOptional(() -> Arrays.stream(npcs)
                 .filter(getThievingNpcFilter().negate())
+                .filter(customFilter)
                 .filter(npc -> !isNpcNull(npc))
                 .anyMatch(n -> me.equals(n.getInteracting()))).orElse(false);
     }
 
     private State getCurrentState() {
-        if (underAttack || isBeingAttackByNpc()) {
+        if (config.escapeAttacking() && (underAttack || isBeingAttackByNpc())) {
             if (!underAttack) underAttack = true;
             return State.ESCAPE;
         }

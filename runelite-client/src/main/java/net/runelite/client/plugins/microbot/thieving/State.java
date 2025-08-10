@@ -4,6 +4,7 @@ public enum State {
     IDLE,
     BANK,
     ESCAPE,
+    LOOT,
     EAT,
     DROP,
     SHADOW_VEIL,

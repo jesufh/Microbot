@@ -64,10 +64,21 @@ public interface ThievingConfig extends Config {
     }
 
     @ConfigItem(
+            keyName = "escapeAttackingNpcs",
+            name = "Escape Attacking NPCs",
+            description = "Whether the bot should run away if its being attacked",
+            position = 1,
+            section = buffsSection
+    )
+    default boolean escapeAttacking() {
+        return true;
+    }
+
+    @ConfigItem(
             keyName = "ignoreStuns",
             name = "Ignore Stuns",
             description = "Whether the bot should ignore stuns and keep left clicking",
-            position = 0,
+            position = 2,
             section = buffsSection
     )
     default boolean ignoreStuns() {
