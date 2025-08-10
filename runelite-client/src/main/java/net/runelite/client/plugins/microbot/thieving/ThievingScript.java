@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.thieving;
 
 import com.google.inject.Inject;
 import lombok.Getter;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Player;
 import net.runelite.api.TileObject;
@@ -10,6 +11,7 @@ import net.runelite.api.ObjectComposition;
 import net.runelite.client.plugins.microbot.thieving.enums.ThievingNpc;
 import net.runelite.client.plugins.microbot.util.cache.Rs2NpcCache;
 import net.runelite.client.plugins.microbot.util.coords.Rs2WorldPoint;
+import net.runelite.client.plugins.microbot.util.walker.WalkerState;
 import net.runelite.client.plugins.skillcalculator.skills.MagicAction;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.Script;
@@ -191,8 +193,20 @@ public class ThievingScript extends Script {
         return State.PICKPOCKET;
     }
 
+    public boolean shouldRun() {
+        if (!Microbot.isLoggedIn()) return false;
+        return super.run();
+    }
+
+    @SneakyThrows
+    private boolean sleepUntilWithInterrupt(BooleanSupplier awaitedCondition, int time) {
+        final boolean result = sleepUntil(awaitedCondition, time);
+        if (Thread.currentThread().isInterrupted() || !shouldRun()) throw new InterruptedException();
+        return result;
+    }
+
     public void loop() {
-        if (!Microbot.isLoggedIn() || !super.run()) return;
+        if (!shouldRun()) return;
         if (initialPlayerLocation == null) initialPlayerLocation = Rs2Player.getWorldLocation();
 
         currentState = getCurrentState();
@@ -200,7 +214,7 @@ public class ThievingScript extends Script {
 
         if (Rs2Player.isStunned() && (currentState != State.PICKPOCKET || !config.ignoreStuns())) {
             currentState = State.STUNNED;
-            sleepUntil(() -> !Rs2Player.isStunned(), 8_000);
+            sleepUntilWithInterrupt(() -> !Rs2Player.isStunned(), 8_000);
             return;
         }
 
@@ -210,21 +224,24 @@ public class ThievingScript extends Script {
                 final WorldPoint escape = thievingNpc == null ? ThievingData.NULL_WORLD_POINT : ThievingData.getVyreEscape(thievingNpc.getName());
                 if (escape != ThievingData.NULL_WORLD_POINT) {
                     log.info("Escaping to {}", toString(escape));
-                    Rs2Walker.walkTo(escape, 5);
+                    final WalkerState walkerState = Rs2Walker.walkWithState(escape, 5);
+                    log.info("Walker state {}", walkerState);
                     final WorldPoint myLoc = Rs2Player.getWorldLocation();
                     if (myLoc != null && myLoc.distanceTo(escape) < 10) {
                         if (underAttack) {
                             underAttack = false;
+                            if (!isRunning()) return;
                             hopWorld();
                         }
 
                         if (Rs2Walker.walkTo(initialPlayerLocation)) {
-                            sleepUntil(() -> !Rs2Player.isMoving(), 1_200);
+                            sleepUntilWithInterrupt(() -> !Rs2Player.isMoving(), 1_200);
                         }
                         DOOR_TIMER.set();
                         return;
                     } else {
                         log.error("Failed to use escape route defaulting to bank escape");
+                        return;
                     }
                 }
             case BANK:
@@ -275,10 +292,10 @@ public class ThievingScript extends Script {
                 }
 
                 if (!Rs2Equipment.isWearing("dodgy necklace") && Rs2Inventory.hasItem("dodgy necklace")) {
-                    if (Rs2Player.isStunned()) sleepUntil(() -> !Rs2Player.isStunned());
+                    if (Rs2Player.isStunned()) sleepUntilWithInterrupt(() -> !Rs2Player.isStunned(), 5_000);
                     log.info("Equipping dodgy necklace");
                     Rs2Inventory.wield("dodgy necklace");
-                    sleepUntil(() -> Rs2Equipment.isWearing("dodgy necklace") || Rs2Player.isStunned(), 1_800);
+                    sleepUntilWithInterrupt(() -> Rs2Equipment.isWearing("dodgy necklace") || Rs2Player.isStunned(), 1_800);
                     return;
                 }
 
@@ -399,7 +416,7 @@ public class ThievingScript extends Script {
             log.error("Failed to cast shadow veil");
             return;
         }
-        if (!sleepUntil(Rs2Magic::isShadowVeilActive, 10_000)) {
+        if (!sleepUntilWithInterrupt(Rs2Magic::isShadowVeilActive, 10_000)) {
             log.error("Failed to await shadow veil active");
             return;
         }
@@ -460,11 +477,11 @@ public class ThievingScript extends Script {
             final WorldPoint doorWp = door.getWorldLocation();
             if (!Rs2GameObject.interact(door, "Close")) return false;
             if (door.getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) > 1) {
-                if (!sleepUntil(() -> Rs2Player.isMoving() || Rs2Player.isStunned(), 1_200)) return false;
+                if (!sleepUntilWithInterrupt(() -> Rs2Player.isMoving() || Rs2Player.isStunned(), 1_200)) return false;
                 if (Rs2Player.isStunned()) return false;
-                sleepUntil(() -> !Rs2Player.isMoving());
+                sleepUntilWithInterrupt(() -> !Rs2Player.isMoving(), 5_000);
             }
-            if (!sleepUntil(() -> getDoors(doorWp, 1).isEmpty() || Rs2Player.isStunned(), 1_200)) {
+            if (!sleepUntilWithInterrupt(() -> getDoors(doorWp, 1).isEmpty() || Rs2Player.isStunned(), 1_200)) {
                 log.warn("Failed to wait closing door @ {}", toString(doorWp));
                 return false;
             }
@@ -479,7 +496,7 @@ public class ThievingScript extends Script {
         for (int i = 0; i < maxTries; i++) {
             if (check.getAsBoolean()) return true;
             action.run();
-            sleepUntil(check, 1_200);
+            sleepUntilWithInterrupt(check, 1_200);
         }
         return false;
     }
@@ -555,8 +572,11 @@ public class ThievingScript extends Script {
             }
         }
 
+        if (Thread.currentThread().isInterrupted() || !isRunning()) return;
         boolean opened = Rs2Bank.isNearBank(bank, 8) ? Rs2Bank.openBank() : Rs2Bank.walkToBankAndUseBank(bank);
         if (!opened || !Rs2Bank.isOpen()) return;
+
+        if (Thread.currentThread().isInterrupted() || !isRunning()) return;
         Rs2Bank.depositAllExcept(getExclusions());
 
         boolean successfullyWithdrawFood = getInventoryAmount(config.food().getName(), config.foodAmount(), true);
@@ -632,7 +652,7 @@ public class ThievingScript extends Script {
         }
 
         if (Rs2Walker.walkTo(initialPlayerLocation)) {
-            sleepUntil(() -> !Rs2Player.isMoving(), 1_200);
+            sleepUntilWithInterrupt(() -> !Rs2Player.isMoving(), 1_200);
         }
         DOOR_TIMER.set();
     }
@@ -670,7 +690,7 @@ public class ThievingScript extends Script {
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             int world = Login.getRandomWorld(true, null);
             Microbot.hopToWorld(world);
-            boolean hopSuccess = sleepUntil(() -> Rs2Player.getWorld() == world && Microbot.loggedIn, 10_000);
+            boolean hopSuccess = sleepUntilWithInterrupt(() -> Rs2Player.getWorld() == world && Microbot.loggedIn, 10_000);
             if (hopSuccess) return;
             sleep(250, 350);
         }

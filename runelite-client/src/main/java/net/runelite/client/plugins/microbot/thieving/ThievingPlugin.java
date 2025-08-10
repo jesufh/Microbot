@@ -13,7 +13,6 @@ import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
 import lombok.Getter;
 import javax.inject.Inject;
-import java.time.Instant;
 import java.awt.*;
 
 @PluginDescriptor(
