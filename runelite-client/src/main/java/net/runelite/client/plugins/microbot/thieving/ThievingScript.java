@@ -1,6 +1,7 @@
 package net.runelite.client.plugins.microbot.thieving;
 
 import com.google.inject.Inject;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -38,13 +39,14 @@ public class ThievingScript extends Script {
     private final ThievingConfig config;
     private final ThievingPlugin plugin;
 
-    public State currentState = State.IDLE;
+    protected State currentState = State.IDLE;
 
     private volatile Rs2NpcModel thievingNpc = null;
 
-    @Getter
+    @Getter(AccessLevel.PROTECTED)
     private volatile boolean underAttack;
 
+    protected volatile boolean forceShadowVeilActive = false;
     private long lastShadowVeil = 0;
 
     private static final int DOOR_CHECK_RADIUS = 10;
@@ -53,7 +55,7 @@ public class ThievingScript extends Script {
     private int doorCloseIndex = 0;
     private long lastAction = Long.MAX_VALUE;
 
-    public static int getCloseDoorTime() {
+    protected static int getCloseDoorTime() {
         return DOOR_TIMER.getRemainingTime();
     }
 
@@ -72,7 +74,7 @@ public class ThievingScript extends Script {
         };
     }
 
-    public String getThievingNpcName() {
+    protected String getThievingNpcName() {
         final Rs2NpcModel npc = thievingNpc;
         if (npc == null) return "null";
         else return thievingNpc.getName();
@@ -201,7 +203,7 @@ public class ThievingScript extends Script {
         return State.PICKPOCKET;
     }
 
-    public boolean shouldRun() {
+    protected boolean shouldRun() {
         if (!Microbot.isLoggedIn()) return false;
         return super.run();
     }
@@ -224,18 +226,20 @@ public class ThievingScript extends Script {
         return walkTo("Walking", dst, 1);
     }
 
-    public void loop() {
+    private void loop() {
         if (!shouldRun()) return;
         if (initialPlayerLocation == null) initialPlayerLocation = Rs2Player.getWorldLocation();
 
         currentState = getCurrentState();
-        if (currentState != State.PICKPOCKET) log.info("State {}", currentState);
-
-        if (Rs2Player.isStunned() && (currentState != State.PICKPOCKET || !config.ignoreStuns())) {
+        // await stun from most recent pickpocket action
+        if (lastAction+600 > System.currentTimeMillis() && (currentState != State.PICKPOCKET || !config.ignoreStuns())) {
             currentState = State.STUNNED;
-            sleepUntilWithInterrupt(() -> !Rs2Player.isStunned(), 8_000);
+            sleepUntilWithInterrupt(Rs2Player::isStunned, 600);
+            sleepUntilWithInterrupt(() -> !Rs2Player.isStunned(), 10_000);
             return;
         }
+
+        if (currentState != State.PICKPOCKET) log.info("State {}", currentState);
 
         switch(currentState) {
             case ESCAPE:
@@ -280,6 +284,7 @@ public class ThievingScript extends Script {
             case EAT:
                 final double hp = Rs2Player.getHealthPercentage();
                 Rs2Player.eatAt(config.hitpoints());
+                Rs2Inventory.dropAll(true, "jug");
                 sleepUntil(() -> Rs2Player.getHealthPercentage() > hp, 800);
                 return;
             case DROP:
@@ -290,7 +295,7 @@ public class ThievingScript extends Script {
                 hopWorld();
                 return;
             case COIN_POUCHES:
-                Rs2Inventory.interact("coin pouch", "Open-all");
+                repeatedAction(() -> Rs2Inventory.interact("coin pouch", "Open-all"), () -> !Rs2Inventory.hasItem("coin pouch"), 3);
                 return;
             case WALK_TO_START:
                 final WorldPoint myLoc = Rs2Player.getWorldLocation();
@@ -450,6 +455,12 @@ public class ThievingScript extends Script {
     }
 
     private boolean shouldCastShadowVeil() {
+        if (forceShadowVeilActive) {
+            forceShadowVeilActive = false;
+            // this should not happen often mostly on client startup when it was on before we logged out, or on world hop
+            sleep(10_000, 15_000);
+            return true;
+        }
         if (!config.shadowVeil()) return false;
         return lastShadowVeil + 60_000 <= System.currentTimeMillis() || !Rs2Magic.isShadowVeilActive();
     }
@@ -464,7 +475,7 @@ public class ThievingScript extends Script {
             log.error("Failed to cast shadow veil");
             return;
         }
-        if (!sleepUntilWithInterrupt(Rs2Magic::isShadowVeilActive, 10_000)) {
+        if (!sleepUntilWithInterrupt(() -> forceShadowVeilActive || Rs2Magic.isShadowVeilActive(), 1_200)) {
             log.error("Failed to await shadow veil active");
             return;
         }
@@ -744,7 +755,7 @@ public class ThievingScript extends Script {
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             int world = Login.getRandomWorld(true, null);
             Microbot.hopToWorld(world);
-            boolean hopSuccess = sleepUntilWithInterrupt(() -> Rs2Player.getWorld() == world && Microbot.loggedIn, 10_000);
+            boolean hopSuccess = sleepUntil(() -> Rs2Player.getWorld() == world && Microbot.loggedIn, 10_000);
             if (hopSuccess) return;
             sleep(250, 350);
         }

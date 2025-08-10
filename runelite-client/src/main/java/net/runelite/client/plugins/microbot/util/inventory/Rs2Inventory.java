@@ -448,6 +448,10 @@ public class Rs2Inventory {
         return true;
     }
 
+    public static boolean dropAll(boolean exact, String... names) {
+        return dropAll(Rs2ItemModel.matches(exact, names));
+    }
+
     /**
      * Drops all items in the inventory.
      *

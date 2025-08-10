@@ -2,8 +2,10 @@ package net.runelite.client.plugins.microbot.thieving;
 
 import java.time.Duration;
 import net.runelite.api.Skill;
+import net.runelite.api.events.ChatMessage;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -85,5 +87,12 @@ public class ThievingPlugin extends Plugin {
 
     public State getState() {
         return thievingScript.currentState;
+    }
+
+    @Subscribe
+    public void onChatMessage(ChatMessage event) {
+        if (!event.getMessage().toLowerCase().contains("you can only cast shadow veil every 30 seconds.")) return;
+        log.warn("Attempted to cast shadow veil while it was active");
+        getThievingScript().forceShadowVeilActive = true;
     }
 }
