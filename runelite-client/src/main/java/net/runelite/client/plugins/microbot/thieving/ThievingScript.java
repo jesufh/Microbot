@@ -38,8 +38,6 @@ public class ThievingScript extends Script {
     private final ThievingConfig config;
     private final ThievingPlugin plugin;
 
-    private static final int DARKMEYER_REGION = 14388;
-
     public State currentState = State.IDLE;
 
     private volatile Rs2NpcModel thievingNpc = null;
@@ -243,8 +241,22 @@ public class ThievingScript extends Script {
 
         switch(currentState) {
             case ESCAPE:
-                if (thievingNpc == null) thievingNpc = getThievingNpc();
-                final WorldPoint escape = thievingNpc == null ? ThievingData.NULL_WORLD_POINT : ThievingData.getVyreEscape(thievingNpc.getName());
+                WorldPoint escape = null;
+                final String escapeLocationString = config.customEscapeLocation();
+                if (!escapeLocationString.isBlank()) {
+                    final String[] split = Arrays.stream(escapeLocationString.split(",")).map(String::strip).toArray(String[]::new);
+                    if (split.length == 3) {
+                        try {
+                            escape = new WorldPoint(Integer.parseInt(split[0]),Integer.parseInt(split[1]),Integer.parseInt(split[2]));
+                        } catch (NumberFormatException e) {
+                            log.error("Invalid custom escape location={}", escapeLocationString);
+                        }
+                    }
+                }
+                if (escape == null) {
+                    if (thievingNpc == null) thievingNpc = getThievingNpc();
+                    escape = thievingNpc == null ? ThievingData.NULL_WORLD_POINT : ThievingData.getVyreEscape(thievingNpc.getName());
+                }
                 if (escape != ThievingData.NULL_WORLD_POINT) {
                     walkTo("Escaping", escape, 5);
                     final WorldPoint myLoc = Rs2Player.getWorldLocation();
@@ -262,7 +274,6 @@ public class ThievingScript extends Script {
                         return;
                     } else {
                         log.error("Failed to use escape route defaulting to bank escape");
-                        return;
                     }
                 }
             case BANK:

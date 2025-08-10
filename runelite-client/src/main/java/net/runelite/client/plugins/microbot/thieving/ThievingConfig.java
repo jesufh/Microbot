@@ -75,10 +75,21 @@ public interface ThievingConfig extends Config {
     }
 
     @ConfigItem(
+            keyName = "customEscapeLocation",
+            name = "Custom Escape Location",
+            description = "Where the bot should run to if its attack. Format: digitX,digitY,digitZ",
+            position = 2,
+            section = buffsSection
+    )
+    default String customEscapeLocation() {
+        return "";
+    }
+
+    @ConfigItem(
             keyName = "ignoreStuns",
             name = "Ignore Stuns",
             description = "Whether the bot should ignore stuns and keep left clicking",
-            position = 2,
+            position = 3,
             section = buffsSection
     )
     default boolean ignoreStuns() {
