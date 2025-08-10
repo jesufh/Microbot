@@ -152,6 +152,26 @@ public class ThievingScript extends Script {
         if (isNpcNull(thievingNpc) && (thievingNpc = getThievingNpc()) == null) return State.WALK_TO_START;
 
         if (config.THIEVING_NPC() == ThievingNpc.VYRES) {
+            final WorldPoint[] housePolygon = ThievingData.getVyreHouse(thievingNpc.getName());
+
+            if (Rs2NpcCache.getAllNpcs()
+                    .filter(Rs2NpcModel.matches(true, "Vyrewatch Sentinel"))
+                    .anyMatch(npc -> isPointInPolygon(housePolygon, npc.getWorldLocation()))) {
+                log.info("Vyrewatch Sentinel inside house");
+                return State.HOP;
+            }
+
+            if (!isPointInPolygon(housePolygon, thievingNpc.getWorldLocation())) {
+                if (!sleepUntil(() -> isPointInPolygon(housePolygon, thievingNpc.getWorldLocation()), 1_200 + (int)(Math.random() * 1_800))) {
+                    log.info("Vyre outside house @ {}", toString(thievingNpc.getWorldLocation()));
+                    return State.HOP;
+                }
+            }
+
+            if (!isPointInPolygon(housePolygon, Rs2Player.getWorldLocation())) {
+                return State.WALK_TO_START;
+            }
+
             // delayed door closing logic
             List<TileObject> doors = getDoors(Rs2Player.getWorldLocation(), DOOR_CHECK_RADIUS);
             if (doors.isEmpty()) {
@@ -176,28 +196,6 @@ public class ThievingScript extends Script {
         }
 
         if (shouldOpenCoinPouches()) return State.COIN_POUCHES;
-
-        if (config.THIEVING_NPC() == ThievingNpc.VYRES) {
-            final WorldPoint[] housePolygon = ThievingData.getVyreHouse(thievingNpc.getName());
-
-            if (Rs2NpcCache.getAllNpcs()
-                    .filter(Rs2NpcModel.matches(true, "Vyrewatch Sentinel"))
-                    .anyMatch(npc -> isPointInPolygon(housePolygon, npc.getWorldLocation()))) {
-                log.info("Vyrewatch Sentinel inside house");
-                return State.HOP;
-            }
-
-            if (!isPointInPolygon(housePolygon, thievingNpc.getWorldLocation())) {
-                if (!sleepUntil(() -> isPointInPolygon(housePolygon, thievingNpc.getWorldLocation()), 8_000 + (int)(Math.random() * 4_000))) {
-                    log.info("Vyre outside house @ {}", toString(thievingNpc.getWorldLocation()));
-                    return State.HOP;
-                }
-            }
-
-            if (!isPointInPolygon(housePolygon, Rs2Player.getWorldLocation())) {
-                walkTo(thievingNpc.getWorldLocation());
-            }
-        }
 
         if (shouldCastShadowVeil()) return State.SHADOW_VEIL;
         return State.PICKPOCKET;
@@ -295,7 +293,16 @@ public class ThievingScript extends Script {
                 Rs2Inventory.interact("coin pouch", "Open-all");
                 return;
             case WALK_TO_START:
-                walkTo(initialPlayerLocation);
+                final WorldPoint myLoc = Rs2Player.getWorldLocation();
+                if (myLoc == null) {
+                    log.warn("Player Location is null");
+                    return;
+                }
+                if (myLoc.distanceTo(initialPlayerLocation) <= 5) {
+                    walkTo(thievingNpc.getWorldLocation());
+                } else {
+                    walkTo(initialPlayerLocation);
+                }
                 Rs2Player.waitForWalking();
                 return;
             case SHADOW_VEIL:
@@ -305,12 +312,15 @@ public class ThievingScript extends Script {
                 if (isNpcNull(thievingNpc)) return;
                 final String name = thievingNpc.getName();
                 final WorldPoint[] house = ThievingData.getVyreHouse(name);
-                final WorldPoint myLoc = Rs2Player.getWorldLocation();
-                if (isPointInPolygon(house, myLoc)) {
-                    log.info("Closing door {} in {} house", toString(myLoc), name);
+                final WorldPoint myLoc2 = Rs2Player.getWorldLocation();
+                if (isPointInPolygon(house, myLoc2)) {
+                    log.info("Closing door {} in {} house", toString(myLoc2), name);
                     if (closeNearbyDoor(DOOR_CHECK_RADIUS)) DOOR_TIMER.unset();
-                } else if (isPointInPolygon(ThievingData.getVyreHouse(thievingNpc.getName()), thievingNpc.getWorldLocation())) {
+                } else if (isPointInPolygon(house, thievingNpc.getWorldLocation())) {
                     walkTo(thievingNpc.getWorldLocation());
+                } else {
+                    log.warn("This door close state should never happen");
+                    hopWorld();
                 }
                 return;
             case PICKPOCKET:
