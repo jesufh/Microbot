@@ -31,6 +31,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 @Slf4j
 public class ThievingScript extends Script {
@@ -185,7 +186,7 @@ public class ThievingScript extends Script {
             }
 
             if (!isPointInPolygon(housePolygon, Rs2Player.getWorldLocation())) {
-                Rs2Walker.walkTo(thievingNpc.getWorldLocation());
+                walkTo(thievingNpc.getWorldLocation());
             }
         }
 
@@ -203,6 +204,17 @@ public class ThievingScript extends Script {
         final boolean result = sleepUntil(awaitedCondition, time);
         if (Thread.currentThread().isInterrupted() || !shouldRun()) throw new InterruptedException();
         return result;
+    }
+
+    private boolean walkTo(String info, WorldPoint dst, int distance) {
+        log.info("{} to {}", info, toString(dst));
+        final WalkerState walkerState = Rs2Walker.walkWithState(dst, distance);
+        log.info("{} @ {} - dst={}", walkerState, Rs2Player.getWorldLocation(), dst);
+        return walkerState == WalkerState.ARRIVED;
+    }
+
+    private boolean walkTo(WorldPoint dst) {
+        return walkTo("Walking", dst, 1);
     }
 
     public void loop() {
@@ -223,9 +235,7 @@ public class ThievingScript extends Script {
                 if (thievingNpc == null) thievingNpc = getThievingNpc();
                 final WorldPoint escape = thievingNpc == null ? ThievingData.NULL_WORLD_POINT : ThievingData.getVyreEscape(thievingNpc.getName());
                 if (escape != ThievingData.NULL_WORLD_POINT) {
-                    log.info("Escaping to {}", toString(escape));
-                    final WalkerState walkerState = Rs2Walker.walkWithState(escape, 5);
-                    log.info("Walker state {}", walkerState);
+                    walkTo("Escaping", escape, 5);
                     final WorldPoint myLoc = Rs2Player.getWorldLocation();
                     if (myLoc != null && myLoc.distanceTo(escape) < 10) {
                         if (underAttack) {
@@ -234,7 +244,7 @@ public class ThievingScript extends Script {
                             hopWorld();
                         }
 
-                        if (Rs2Walker.walkTo(initialPlayerLocation)) {
+                        if (walkTo(initialPlayerLocation)) {
                             sleepUntilWithInterrupt(() -> !Rs2Player.isMoving(), 1_200);
                         }
                         DOOR_TIMER.set();
@@ -261,7 +271,7 @@ public class ThievingScript extends Script {
                 Rs2Inventory.interact("coin pouch", "Open-all");
                 return;
             case WALK_TO_START:
-                Rs2Walker.walkTo(initialPlayerLocation, 1);
+                walkTo(initialPlayerLocation);
                 Rs2Player.waitForWalking();
                 return;
             case SHADOW_VEIL:
@@ -276,7 +286,7 @@ public class ThievingScript extends Script {
                     log.info("Closing door {} in {} house", toString(myLoc), name);
                     if (closeNearbyDoor(DOOR_CHECK_RADIUS)) DOOR_TIMER.unset();
                 } else if (isPointInPolygon(ThievingData.getVyreHouse(thievingNpc.getName()), thievingNpc.getWorldLocation())) {
-                    Rs2Walker.walkTo(thievingNpc.getWorldLocation());
+                    walkTo(thievingNpc.getWorldLocation());
                 }
                 return;
             case PICKPOCKET:
@@ -533,20 +543,20 @@ public class ThievingScript extends Script {
         return true;
     }
 
-    private String[] getExclusions() {
-        final ArrayList<String> exclusions = new ArrayList<>(ThievingData.ROGUE_SET);
+    private Set<String> getExclusions() {
+        final Set<String> exclusions = new HashSet<>(ThievingData.ROGUE_SET);
         if (config.THIEVING_NPC() == ThievingNpc.VYRES) exclusions.addAll(ThievingData.VYRE_SET);
-        exclusions.add("Coin pouch");
+        exclusions.add("coin pouch");
         if (config.shadowVeil()) {
-            exclusions.add("Cosmic rune");
-            if (!Rs2Equipment.isWearing("Lava battlestaff")) {
-                exclusions.add("Earth rune");
-                exclusions.add("Fire rune");
+            exclusions.add("cosmic rune");
+            if (!Rs2Equipment.isWearing("lava battlestaff")) {
+                exclusions.add("earth rune");
+                exclusions.add("fire rune");
             }
         }
-        if (config.dodgyNecklaceAmount() > 0) exclusions.add("Dodgy necklace");
+        if (config.dodgyNecklaceAmount() > 0) exclusions.add("dodgy necklace");
         if (config.useFood()) exclusions.add(config.food().getName());
-        return exclusions.toArray(String[]::new);
+        return exclusions;
     }
 
     private boolean getInventoryAmount(String name, int amount, boolean exact) {
@@ -651,21 +661,25 @@ public class ThievingScript extends Script {
             hopWorld();
         }
 
-        if (Rs2Walker.walkTo(initialPlayerLocation)) {
+        if (walkTo(initialPlayerLocation)) {
             sleepUntilWithInterrupt(() -> !Rs2Player.isMoving(), 1_200);
         }
         DOOR_TIMER.set();
     }
 
     private void dropAllExceptImportant() {
-        Set<String> keep = new HashSet<>();
+        final Set<String> keep = getExclusions();
         if (config.DoNotDropItemList() != null && !config.DoNotDropItemList().isEmpty())
-            keep.addAll(Arrays.asList(config.DoNotDropItemList().split(",")));
+            keep.addAll(
+                    Arrays.stream(config.DoNotDropItemList().split(","))
+                            .map(String::strip)
+                            .map(String::toLowerCase)
+                            .collect(Collectors.toSet())
+            );
         Rs2Inventory.getInventoryFood().forEach(food -> keep.add(food.getName()));
-        keep.add("dodgy necklace"); keep.add("coins"); keep.add("coin pouch"); keep.add("book of the dead"); keep.add("drakan's medallion");
-        if (config.shadowVeil()) Collections.addAll(keep, "Fire rune", "Earth rune", "Cosmic rune");
-        keep.addAll(ThievingData.VYRE_SET); keep.addAll(ThievingData.ROGUE_SET);
-        Rs2Inventory.dropAllExcept(config.keepItemsAboveValue(), keep.toArray(new String[0]));
+        Collections.addAll(keep, "coins", "book of the dead");
+        if (config.THIEVING_NPC() == ThievingNpc.VYRES) Collections.addAll(keep,"drakan's medallion", "blood shard");
+        Rs2Inventory.dropAllExcept(config.keepItemsAboveValue(), keep.toArray(String[]::new));
     }
 
     private boolean waitUntilBothInPolygon(WorldPoint[] polygon, Rs2NpcModel npc, long timeoutMs) {
