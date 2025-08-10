@@ -59,6 +59,13 @@ public class ThievingOverlay extends OverlayPanel {
 
             panelComponent.getChildren().add(
                     LineComponent.builder()
+                            .left("NPC:")
+                            .right(plugin.getThievingScript().getThievingNpcName())
+                            .build()
+            );
+
+            panelComponent.getChildren().add(
+                    LineComponent.builder()
                             .left("Under Attack:")
                             .right(plugin.getThievingScript().isUnderAttack() + "")
                             .build()

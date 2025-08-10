@@ -42,7 +42,7 @@ public class ThievingScript extends Script {
 
     public State currentState = State.IDLE;
 
-    private Rs2NpcModel thievingNpc = null;
+    private volatile Rs2NpcModel thievingNpc = null;
 
     @Getter
     private volatile boolean underAttack;
@@ -72,6 +72,12 @@ public class ThievingScript extends Script {
             if (name == null) return false;
             return stringPredicate.test(name);
         };
+    }
+
+    public String getThievingNpcName() {
+        final Rs2NpcModel npc = thievingNpc;
+        if (npc == null) return "null";
+        else return thievingNpc.getName();
     }
 
     private Predicate<Rs2NpcModel> getThievingNpcFilter() {
@@ -263,7 +269,9 @@ public class ThievingScript extends Script {
                 bankAndEquip();
                 return;
             case EAT:
+                final double hp = Rs2Player.getHealthPercentage();
                 Rs2Player.eatAt(config.hitpoints());
+                sleepUntil(() -> Rs2Player.getHealthPercentage() > hp, 800);
                 return;
             case DROP:
                 dropAllExceptImportant();
@@ -295,12 +303,15 @@ public class ThievingScript extends Script {
                 }
                 return;
             case PICKPOCKET:
-                if (!isWearing(ThievingData.ROGUE_SET)) {
+                if (Rs2Inventory.hasItem(ThievingData.ROGUE_SET.toArray(String[]::new)) && !isWearing(ThievingData.ROGUE_SET)) {
                     // only equip if we are safely in the house w/ the npc
-                    if ((new Rs2WorldPoint(Rs2Player.getWorldLocation())).distanceToPath(thievingNpc.getWorldLocation()) < Integer.MAX_VALUE) {
+                    if (config.THIEVING_NPC() != ThievingNpc.VYRES ||
+                            (new Rs2WorldPoint(Rs2Player.getWorldLocation())).distanceToPath(thievingNpc.getWorldLocation()) < Integer.MAX_VALUE) {
                         if (equip(ThievingData.ROGUE_SET)) {
                             log.info("Equipped rogue set");
                         }
+                    } else {
+                        log.info("Cannot reach {} @ {}", thievingNpc.getName(), thievingNpc.getWorldLocation());
                     }
                     DOOR_TIMER.set();
                     return;
@@ -518,12 +529,14 @@ public class ThievingScript extends Script {
 
     private boolean equip(String item) {
         if (Rs2Equipment.isWearing(item)) return true;
+
+        final int distanceToBank = Rs2Bank.getNearestBank().getWorldPoint().distanceTo(Rs2Player.getWorldLocation());
         final boolean success;
         if (Rs2Inventory.contains(item)) {
-            if (Rs2Player.getWorldLocation().getRegionID() == DARKMEYER_REGION) return true;
+            if (config.THIEVING_NPC() == ThievingNpc.VYRES && distanceToBank < 10) return true;
             success = repeatedAction(() -> Rs2Inventory.wear(item), () -> Rs2Equipment.isWearing(item), 3);
             if (!success) log.error("Failed to equip {}", item);
-        } else if (Rs2Bank.hasBankItem(item)) {
+        } else if (distanceToBank <= 10 && Rs2Bank.hasBankItem(item)) {
             success = repeatedAction(() -> Rs2Bank.withdrawItem(item), () -> Rs2Inventory.contains(item), 3);
             if (!success) log.error("Could not withdraw item to equip {}", item);
             else return equip(item);
