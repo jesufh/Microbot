@@ -10,8 +10,12 @@ import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.ObjectComposition;
 import net.runelite.client.plugins.microbot.thieving.enums.ThievingNpc;
+import net.runelite.client.plugins.microbot.util.cache.Rs2GroundItemCache;
 import net.runelite.client.plugins.microbot.util.cache.Rs2NpcCache;
 import net.runelite.client.plugins.microbot.util.coords.Rs2WorldPoint;
+import net.runelite.client.plugins.microbot.util.grounditem.Rs2GroundItem;
+import net.runelite.client.plugins.microbot.util.grounditem.Rs2GroundItemModel;
+import net.runelite.client.plugins.microbot.util.models.RS2Item;
 import net.runelite.client.plugins.microbot.util.walker.WalkerState;
 import net.runelite.client.plugins.skillcalculator.skills.MagicAction;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -139,7 +143,24 @@ public class ThievingScript extends Script {
                 .anyMatch(n -> me.equals(n.getInteracting()))).orElse(false);
     }
 
+    private int getMostExpensiveGroundItemId() {
+        final int minPrice = config.keepItemsAboveValue();
+        // takes long of client thread if there are a lot of dropped items
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> Rs2GroundItemCache.getAllGroundItems()
+                .filter(Rs2GroundItemModel::isOwned)
+                .map(Rs2GroundItemModel::getId)
+                .distinct()
+                .map(id -> {
+                    final int price = Microbot.getItemManager().getItemPrice(id);
+                    return Map.entry(id, price);
+                }).filter(entry -> entry.getValue() >= minPrice)
+                .max(Comparator.comparingInt(Map.Entry::getValue))
+                .map(Map.Entry::getKey).orElse(-1)).orElse(-1);
+    }
+
     private State getCurrentState() {
+        if (getMostExpensiveGroundItemId() != -1) return State.LOOT;
+
         if (config.escapeAttacking() && (underAttack || isBeingAttackByNpc())) {
             if (!underAttack) underAttack = true;
             return State.ESCAPE;
@@ -216,6 +237,10 @@ public class ThievingScript extends Script {
     }
 
     private boolean walkTo(String info, WorldPoint dst, int distance) {
+        if (dst == null) {
+            log.error("{} to null", info);
+            return false;
+        }
         log.info("{} to {}", info, toString(dst));
         final WalkerState walkerState = Rs2Walker.walkWithState(dst, distance);
         log.info("{} @ {} - dst={}", walkerState, Rs2Player.getWorldLocation(), dst);
@@ -231,17 +256,30 @@ public class ThievingScript extends Script {
         if (initialPlayerLocation == null) initialPlayerLocation = Rs2Player.getWorldLocation();
 
         currentState = getCurrentState();
-        // await stun from most recent pickpocket action
-        if (lastAction+600 > System.currentTimeMillis() && (currentState != State.PICKPOCKET || !config.ignoreStuns())) {
-            currentState = State.STUNNED;
-            sleepUntilWithInterrupt(Rs2Player::isStunned, 600);
-            sleepUntilWithInterrupt(() -> !Rs2Player.isStunned(), 10_000);
-            return;
+        if (currentState.isAwaitStuns()) { // some actions like eating/dropping can be done while stunned
+            // await stun from most recent pickpocket action
+            if (lastAction+600 > System.currentTimeMillis() && (currentState != State.PICKPOCKET || !config.ignoreStuns())) {
+                currentState = State.STUNNED;
+                sleepUntilWithInterrupt(Rs2Player::isStunned, 600);
+                sleepUntilWithInterrupt(() -> !Rs2Player.isStunned(), 10_000);
+                return;
+            }
         }
 
         if (currentState != State.PICKPOCKET) log.info("State {}", currentState);
 
         switch(currentState) {
+            case LOOT:
+                final int id = getMostExpensiveGroundItemId();
+                if (id == -1) return;
+                if (Rs2Inventory.isFull()) dropAllExceptImportant();
+                final RS2Item item = Arrays.stream(Rs2GroundItem.getAll(50))
+                        .filter(rs2Item -> rs2Item.getItem().getId() == id)
+                        .findFirst().orElse(null);
+                if (item == null) return;
+                walkTo(item.getTile().getWorldLocation());
+                Rs2GroundItem.interact(item);
+                return;
             case ESCAPE:
                 WorldPoint escape = null;
                 final String escapeLocationString = config.customEscapeLocation();
@@ -304,7 +342,11 @@ public class ThievingScript extends Script {
                     return;
                 }
                 if (myLoc.distanceTo(initialPlayerLocation) <= 5) {
-                    walkTo(thievingNpc.getWorldLocation());
+                    if (thievingNpc != null) walkTo(thievingNpc.getWorldLocation());
+                    else {
+                        hopWorld();
+                        return;
+                    }
                 } else {
                     walkTo(initialPlayerLocation);
                 }
@@ -364,7 +406,17 @@ public class ThievingScript extends Script {
                 var highlighted = net.runelite.client.plugins.npchighlight.NpcIndicatorsPlugin.getHighlightedNpcs();
                 if (highlighted.isEmpty()) {
                     if (isNpcNull(thievingNpc)) return;
-                    if (!Rs2Npc.pickpocket(thievingNpc)) thievingNpc = null;
+                    if (!Rs2Npc.pickpocket(thievingNpc)) {
+                        thievingNpc = getThievingNpc();
+                        if (isNpcNull(thievingNpc)) return;
+                        if (!Rs2Npc.pickpocket(thievingNpc)) {
+                            // NPC Cache force refresh or something should work here as well
+                            // it seems sometimes the data in it become stale
+                            log.warn("NPC seems bugged hopping world");
+                            hopWorld();
+                            return;
+                        }
+                    }
                 } else {
                     Rs2Npc.pickpocket(highlighted);
                 }
@@ -496,7 +548,7 @@ public class ThievingScript extends Script {
         if (worldPoint == null) return true;
         final WorldPoint myLoc = Rs2Player.getWorldLocation();
         if (myLoc == null || myLoc.distanceTo(worldPoint) >= 20) return true;
-        return false;
+        return npc.getLocalLocation() == null;
     }
 
     private String toString(WorldPoint point) {
@@ -563,13 +615,13 @@ public class ThievingScript extends Script {
     private boolean equip(String item) {
         if (Rs2Equipment.isWearing(item)) return true;
 
-        final int distanceToBank = Rs2Bank.getNearestBank().getWorldPoint().distanceTo(Rs2Player.getWorldLocation());
         final boolean success;
         if (Rs2Inventory.contains(item)) {
-            if (config.THIEVING_NPC() == ThievingNpc.VYRES && distanceToBank < 10) return true;
+            if (config.THIEVING_NPC() == ThievingNpc.VYRES &&
+                    BankLocation.DARKMEYER.getWorldPoint().distanceTo(Rs2Player.getWorldLocation()) < 10) return true;
             success = repeatedAction(() -> Rs2Inventory.wear(item), () -> Rs2Equipment.isWearing(item), 3);
             if (!success) log.error("Failed to equip {}", item);
-        } else if (distanceToBank <= 10 && Rs2Bank.hasBankItem(item)) {
+        } else if (Rs2Bank.isOpen() && Rs2Bank.hasBankItem(item)) {
             success = repeatedAction(() -> Rs2Bank.withdrawItem(item), () -> Rs2Inventory.contains(item), 3);
             if (!success) log.error("Could not withdraw item to equip {}", item);
             else return equip(item);
