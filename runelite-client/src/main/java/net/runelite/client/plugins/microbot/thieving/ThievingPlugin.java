@@ -41,7 +41,7 @@ public class ThievingPlugin extends Plugin {
     @Getter
     private ThievingScript thievingScript;
 
-    public static String version = "1.6.7";
+    public static String version = "2";
     private int startXp = 0;
 	@Getter
 	private int maxCoinPouch;

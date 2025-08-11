@@ -134,9 +134,10 @@ public class ThievingScript extends Script {
 
         final Predicate<Rs2NpcModel> customFilter = config.THIEVING_NPC() == ThievingNpc.VYRES ?
                 Rs2NpcModel.matches(true, "vyrewatch sentinel") :
-                npc -> true; // TODO: fix for random event npcs
+                npc -> true;
 
         return Microbot.getClientThread().runOnClientThreadOptional(() -> Arrays.stream(npcs)
+                .filter(npc -> npc.getCombatLevel() > 0)
                 .filter(getThievingNpcFilter().negate())
                 .filter(customFilter)
                 .filter(npc -> !isNpcNull(npc))
