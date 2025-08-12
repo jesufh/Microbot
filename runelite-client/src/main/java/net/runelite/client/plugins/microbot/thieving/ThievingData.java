@@ -13,17 +13,17 @@ public final class ThievingData {
     public static final WorldArea ARDOUGNE_AREA = new WorldArea(2649, 3280, 7, 8, 0);
 
     public static final Set<String> VYRE_SET = Set.of(
-            "Vyre noble shoes",
-            "Vyre noble legs",
-            "Vyre noble top"
+            "vyre noble shoes",
+            "vyre noble legs",
+            "vyre noble top"
     );
 
     public static final Set<String> ROGUE_SET = Set.of(
-            "Rogue mask",
-            "Rogue top",
-            "Rogue trousers",
-            "Rogue boots",
-            "Rogue gloves"
+            "rogue mask",
+            "rogue top",
+            "rogue trousers",
+            "rogue boots",
+            "rogue gloves"
     );
 
     private static final Map<String, WorldPoint[]> VYRE_HOUSES = Map.of(
@@ -52,6 +52,7 @@ public final class ThievingData {
     );
 
     public static WorldPoint getVyreEscape(String vyreName) {
+        if (vyreName == null) return NULL_WORLD_POINT;
         assert VYRE_ESCAPE.containsKey(vyreName);
         return VYRE_ESCAPE.getOrDefault(vyreName, NULL_WORLD_POINT);
     }

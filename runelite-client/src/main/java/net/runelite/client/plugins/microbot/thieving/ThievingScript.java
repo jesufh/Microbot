@@ -3,7 +3,6 @@ package net.runelite.client.plugins.microbot.thieving;
 import com.google.inject.Inject;
 import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Player;
 import net.runelite.api.TileObject;
@@ -34,9 +33,12 @@ import net.runelite.client.plugins.microbot.util.security.Login;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 public class ThievingScript extends Script {
@@ -125,23 +127,39 @@ public class ThievingScript extends Script {
         return npc;
     }
 
-    private boolean isBeingAttackByNpc() {
+    private <T> T getAttackingNpcs(Function<Stream<Rs2NpcModel>, T> consumer, T defaultValue) {
         final Player me = Microbot.getClient().getLocalPlayer();
-        if (me == null) return false;
+        if (me == null) return defaultValue;
 
         final Rs2NpcModel[] npcs = Rs2NpcCache.getAllNpcs().toArray(Rs2NpcModel[]::new);
-        if (npcs.length == 0) return false;
+        if (npcs.length == 0) return defaultValue;
 
         final Predicate<Rs2NpcModel> customFilter = config.THIEVING_NPC() == ThievingNpc.VYRES ?
                 Rs2NpcModel.matches(true, "vyrewatch sentinel") :
                 npc -> true;
 
-        return Microbot.getClientThread().runOnClientThreadOptional(() -> Arrays.stream(npcs)
-                .filter(npc -> npc.getCombatLevel() > 0)
-                .filter(getThievingNpcFilter().negate())
-                .filter(customFilter)
-                .filter(npc -> !isNpcNull(npc))
-                .anyMatch(n -> me.equals(n.getInteracting()))).orElse(false);
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+                consumer.apply(Arrays.stream(npcs)
+                        .filter(npc -> npc.getCombatLevel() > 0)
+                        .filter(getThievingNpcFilter().negate())
+                        .filter(customFilter)
+                        .filter(npc -> !isNpcNull(npc))
+                        .filter(n -> me.equals(n.getInteracting()))
+                )
+        ).orElse(defaultValue);
+    }
+
+    private boolean isBeingAttackByNpc() {
+        return getAttackingNpcs(npcs -> npcs.findAny().isPresent(), false);
+    }
+
+    private Rs2NpcModel getAttackingNpc() {
+        final WorldPoint myLoc = Rs2Player.getWorldLocation();
+        if (myLoc == null) return null;
+        return getAttackingNpcs(npcs ->
+                npcs.min(Comparator.comparingInt(npc -> myLoc.distanceTo(npc.getWorldLocation())))
+                        .orElse(null), null
+        );
     }
 
     private int getMostExpensiveGroundItemId() {
@@ -187,7 +205,7 @@ public class ThievingScript extends Script {
 
             if (!isPointInPolygon(housePolygon, thievingNpc.getWorldLocation())) {
                 if (!sleepUntil(() -> isPointInPolygon(housePolygon, thievingNpc.getWorldLocation()), 1_200 + (int)(Math.random() * 1_800))) {
-                    log.info("Vyre outside house @ {}", toString(thievingNpc.getWorldLocation()));
+                    log.info("Vyre='{}' outside house @ {}", thievingNpc.getName(), toString(thievingNpc.getWorldLocation()));
                     return State.HOP;
                 }
             }
@@ -230,10 +248,9 @@ public class ThievingScript extends Script {
         return super.run();
     }
 
-    @SneakyThrows
     private boolean sleepUntilWithInterrupt(BooleanSupplier awaitedCondition, int time) {
         final boolean result = sleepUntil(awaitedCondition, time);
-        if (Thread.currentThread().isInterrupted() || !shouldRun()) throw new InterruptedException();
+        if (Thread.currentThread().isInterrupted() || !shouldRun()) throw new SelfInterruptException("Should not be running");
         return result;
     }
 
@@ -296,7 +313,8 @@ public class ThievingScript extends Script {
                 }
                 if (escape == null) {
                     if (thievingNpc == null) thievingNpc = getThievingNpc();
-                    escape = thievingNpc == null ? ThievingData.NULL_WORLD_POINT : ThievingData.getVyreEscape(thievingNpc.getName());
+                    final String name = thievingNpc == null ? null : thievingNpc.getName();
+                    escape = name == null ? ThievingData.NULL_WORLD_POINT : ThievingData.getVyreEscape(thievingNpc.getName());
                 }
                 if (escape != ThievingData.NULL_WORLD_POINT) {
                     walkTo("Escaping", escape, 5);
@@ -436,6 +454,9 @@ public class ThievingScript extends Script {
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try {
                 loop();
+            } catch (SelfInterruptException ex) {
+                log.info("Self Interrupt: {}", ex.getMessage());
+                thievingNpc = null;
             } catch (Exception ex) {
                 Microbot.logStackTrace(getClass().getSimpleName(), ex);
                 thievingNpc = null;
@@ -469,7 +490,7 @@ public class ThievingScript extends Script {
         return hasReqs;
     }
 
-    private boolean isPointInPolygon(WorldPoint[] polygon, WorldPoint point) {
+    protected static boolean isPointInPolygon(WorldPoint[] polygon, WorldPoint point) {
         if (polygon == null || point == null) return false;
         int n = polygon.length;
         if (n < 3) return false;
@@ -508,13 +529,13 @@ public class ThievingScript extends Script {
     }
 
     private boolean shouldCastShadowVeil() {
+        if (!config.shadowVeil()) return false;
         if (forceShadowVeilActive) {
             forceShadowVeilActive = false;
             // this should not happen often mostly on client startup when it was on before we logged out, or on world hop
             sleep(10_000, 15_000);
             return true;
         }
-        if (!config.shadowVeil()) return false;
         return lastShadowVeil + 60_000 <= System.currentTimeMillis() || !Rs2Magic.isShadowVeilActive();
     }
 
@@ -613,24 +634,27 @@ public class ThievingScript extends Script {
         return false;
     }
 
-    private boolean equip(String item) {
+    private boolean equip(String item, boolean shouldLog) {
         if (Rs2Equipment.isWearing(item)) return true;
 
         final boolean success;
         if (Rs2Inventory.contains(item)) {
-            if (config.THIEVING_NPC() == ThievingNpc.VYRES &&
-                    BankLocation.DARKMEYER.getWorldPoint().distanceTo(Rs2Player.getWorldLocation()) < 10) return true;
+            if (config.THIEVING_NPC() == ThievingNpc.VYRES && Rs2Bank.isOpen() && isWearing(ThievingData.VYRE_SET)) return true;
             success = repeatedAction(() -> Rs2Inventory.wear(item), () -> Rs2Equipment.isWearing(item), 3);
-            if (!success) log.error("Failed to equip {}", item);
+            if (shouldLog && !success) log.error("Failed to equip {}", item);
         } else if (Rs2Bank.isOpen() && Rs2Bank.hasBankItem(item)) {
             success = repeatedAction(() -> Rs2Bank.withdrawItem(item), () -> Rs2Inventory.contains(item), 3);
-            if (!success) log.error("Could not withdraw item to equip {}", item);
+            if (shouldLog && !success) log.error("Could not withdraw item to equip {}", item);
             else return equip(item);
         } else {
             success = false;
-            log.error("Could not find item to equip {}", item);
+            if (shouldLog) log.error("Could not find item to equip {}", item);
         }
         return success;
+    }
+
+    private boolean equip(String item) {
+        return equip(item, true);
     }
 
     private boolean isWearing(Set<String> set) {
@@ -640,11 +664,15 @@ public class ThievingScript extends Script {
         return true;
     }
 
-    private boolean equip(Set<String> set) {
+    private boolean equip(Set<String> set, boolean shouldLog) {
         for (String item : set) {
-            if (!equip(item)) return false;
+            if (!equip(item, shouldLog)) return false;
         }
         return true;
+    }
+
+    private boolean equip(Set<String> set) {
+        return equip(set, true);
     }
 
     private Set<String> getExclusions() {
@@ -675,6 +703,8 @@ public class ThievingScript extends Script {
         if (config.THIEVING_NPC() == ThievingNpc.VYRES && ThievingData.OUTSIDE_HALLOWED_BANK.distanceTo(Rs2Player.getWorldLocation()) < 20) {
             log.info("Near Hallowed");
             bank = BankLocation.HALLOWED_SEPULCHRE;
+            // it's not needed for banking, but if we have it in inv we should equip it
+            equip(ThievingData.VYRE_SET, false);
         } else {
             log.info("Not Near Hallowed");
             bank = Rs2Bank.getNearestBank();
@@ -786,19 +816,6 @@ public class ThievingScript extends Script {
         Rs2Inventory.dropAllExcept(config.keepItemsAboveValue(), keep.toArray(String[]::new));
     }
 
-    private boolean waitUntilBothInPolygon(WorldPoint[] polygon, Rs2NpcModel npc, long timeoutMs) {
-        long start = System.currentTimeMillis();
-        while (System.currentTimeMillis() - start < timeoutMs) {
-            if (!Microbot.isLoggedIn()) return false;
-            boolean npcInside = isPointInPolygon(polygon, npc.getWorldLocation());
-            boolean playerInside = isPointInPolygon(polygon, Rs2Player.getWorldLocation());
-            if (npcInside && playerInside) {
-                return true;
-            }
-            sleep(250, 350);
-        }
-        return false;
-    }
 
     private void hopWorld() {
         thievingNpc = null;
@@ -808,7 +825,21 @@ public class ThievingScript extends Script {
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             int world = Login.getRandomWorld(true, null);
             Microbot.hopToWorld(world);
-            boolean hopSuccess = sleepUntil(() -> Rs2Player.getWorld() == world && Microbot.loggedIn, 10_000);
+            final AtomicBoolean interrupt = new AtomicBoolean(false);
+            boolean hopSuccess = sleepUntil(() -> {
+                final Rs2NpcModel attacking = getAttackingNpc();
+                if (attacking != null) {
+                    final WorldPoint myLoc = Rs2Player.getWorldLocation();
+                    final WorldPoint npcLoc = attacking.getWorldLocation();
+                    if (myLoc != null && npcLoc != null && myLoc.distanceTo(npcLoc) <= 2) {
+                        log.warn("Getting attacked while hopping");
+                        interrupt.set(true);
+                        return true;
+                    }
+                }
+                return (Rs2Player.getWorld() == world && Microbot.loggedIn);
+            }, 10_000);
+            if (interrupt.get()) throw new SelfInterruptException("Under Attack"); // throw exception so we go back to main-loop
             if (hopSuccess) return;
             sleep(250, 350);
         }
