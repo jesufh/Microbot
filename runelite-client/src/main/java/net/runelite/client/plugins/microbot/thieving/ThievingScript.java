@@ -5,6 +5,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Player;
+import net.runelite.api.Tile;
 import net.runelite.api.TileObject;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.ObjectComposition;
@@ -45,6 +46,8 @@ public class ThievingScript extends Script {
     private final ThievingConfig config;
     private final ThievingPlugin plugin;
 
+    private WorldPoint startingLocation = null;
+
     protected State currentState = State.IDLE;
 
     private volatile Rs2NpcModel thievingNpc = null;
@@ -52,8 +55,8 @@ public class ThievingScript extends Script {
     @Getter(AccessLevel.PROTECTED)
     private volatile boolean underAttack;
 
-    protected volatile boolean forceShadowVeilActive = false;
-    private long lastShadowVeil = 0;
+    protected volatile long forceShadowVeilActive = Long.MIN_VALUE;
+    private long nextShadowVeil = 0;
 
     private static final int DOOR_CHECK_RADIUS = 10;
     private static final ActionTimer DOOR_TIMER = new ActionTimer();
@@ -250,7 +253,7 @@ public class ThievingScript extends Script {
 
     private boolean sleepUntilWithInterrupt(BooleanSupplier awaitedCondition, int time) {
         final boolean result = sleepUntil(awaitedCondition, time);
-        if (Thread.currentThread().isInterrupted() || !shouldRun()) throw new SelfInterruptException("Should not be running");
+        if (!shouldRun()) throw new SelfInterruptException("Should not be running");
         return result;
     }
 
@@ -265,13 +268,15 @@ public class ThievingScript extends Script {
         return walkerState == WalkerState.ARRIVED;
     }
 
-    private boolean walkTo(WorldPoint dst) {
-        return walkTo("Walking", dst, 1);
-    }
-
     private void loop() {
         if (!shouldRun()) return;
-        if (initialPlayerLocation == null) initialPlayerLocation = Rs2Player.getWorldLocation();
+        if (startingLocation == null) {
+            final WorldPoint loc = Rs2Player.getWorldLocation();
+            if (loc != null) {
+                startingLocation = loc;
+                log.info("Set starting location to {}", loc);
+            }
+        }
 
         currentState = getCurrentState();
         if (currentState.isAwaitStuns()) { // some actions like eating/dropping can be done while stunned
@@ -294,8 +299,16 @@ public class ThievingScript extends Script {
                 final RS2Item item = Arrays.stream(Rs2GroundItem.getAll(50))
                         .filter(rs2Item -> rs2Item.getItem().getId() == id)
                         .findFirst().orElse(null);
-                if (item == null) return;
-                walkTo(item.getTile().getWorldLocation());
+                if (item == null) {
+                    log.warn("Loot Item is null");
+                    return;
+                }
+                final Tile tile = item.getTile();
+                if (tile == null) {
+                    log.warn("Loot Tile is null");
+                    return;
+                }
+                walkTo("Walk to loot", item.getTile().getWorldLocation(), 1);
                 Rs2GroundItem.interact(item);
                 return;
             case ESCAPE:
@@ -317,7 +330,7 @@ public class ThievingScript extends Script {
                     escape = name == null ? ThievingData.NULL_WORLD_POINT : ThievingData.getVyreEscape(thievingNpc.getName());
                 }
                 if (escape != ThievingData.NULL_WORLD_POINT) {
-                    walkTo("Escaping", escape, 5);
+                    walkTo("Escaping", escape, 3);
                     final WorldPoint myLoc = Rs2Player.getWorldLocation();
                     if (myLoc != null && myLoc.distanceTo(escape) < 10) {
                         if (underAttack) {
@@ -326,7 +339,7 @@ public class ThievingScript extends Script {
                             hopWorld();
                         }
 
-                        if (walkTo(initialPlayerLocation)) {
+                        if (walkTo("Walk to start", startingLocation, 3)) {
                             sleepUntilWithInterrupt(() -> !Rs2Player.isMoving(), 1_200);
                         }
                         DOOR_TIMER.set();
@@ -360,14 +373,14 @@ public class ThievingScript extends Script {
                     log.warn("Player Location is null");
                     return;
                 }
-                if (myLoc.distanceTo(initialPlayerLocation) <= 5) {
-                    if (thievingNpc != null) walkTo(thievingNpc.getWorldLocation());
+                if (myLoc.distanceTo(startingLocation) <= 5) {
+                    if (thievingNpc != null) walkTo("Walk to npc ", thievingNpc.getWorldLocation(), 1);
                     else {
                         hopWorld();
                         return;
                     }
                 } else {
-                    walkTo(initialPlayerLocation);
+                    walkTo("Walk to start", startingLocation, 3);
                 }
                 Rs2Player.waitForWalking();
                 return;
@@ -383,7 +396,7 @@ public class ThievingScript extends Script {
                     log.info("Closing door {} in {} house", toString(myLoc2), name);
                     if (closeNearbyDoor(DOOR_CHECK_RADIUS)) DOOR_TIMER.unset();
                 } else if (isPointInPolygon(house, thievingNpc.getWorldLocation())) {
-                    walkTo(thievingNpc.getWorldLocation());
+                    walkTo("Walk to npc", thievingNpc.getWorldLocation(), 1);
                 } else {
                     log.warn("This door close state should never happen");
                     hopWorld();
@@ -405,10 +418,9 @@ public class ThievingScript extends Script {
                 }
 
                 if (!Rs2Equipment.isWearing("dodgy necklace") && Rs2Inventory.hasItem("dodgy necklace")) {
-                    if (Rs2Player.isStunned()) sleepUntilWithInterrupt(() -> !Rs2Player.isStunned(), 5_000);
                     log.info("Equipping dodgy necklace");
                     Rs2Inventory.wield("dodgy necklace");
-                    sleepUntilWithInterrupt(() -> Rs2Equipment.isWearing("dodgy necklace") || Rs2Player.isStunned(), 1_800);
+                    sleepUntilWithInterrupt(() -> Rs2Equipment.isWearing("dodgy necklace"), 1_800);
                     return;
                 }
 
@@ -450,6 +462,7 @@ public class ThievingScript extends Script {
     public boolean run() {
         Microbot.isCantReachTargetDetectionEnabled = true;
         lastAction = System.currentTimeMillis();
+        nextShadowVeil = System.currentTimeMillis()+60_000;
         underAttack = false;
         mainScheduledFuture = scheduledExecutorService.scheduleWithFixedDelay(() -> {
             try {
@@ -458,7 +471,7 @@ public class ThievingScript extends Script {
                 log.info("Self Interrupt: {}", ex.getMessage());
                 thievingNpc = null;
             } catch (Exception ex) {
-                Microbot.logStackTrace(getClass().getSimpleName(), ex);
+                log.error("Error in main loop", ex);
                 thievingNpc = null;
             }
         }, 0, 20, TimeUnit.MILLISECONDS);
@@ -530,13 +543,9 @@ public class ThievingScript extends Script {
 
     private boolean shouldCastShadowVeil() {
         if (!config.shadowVeil()) return false;
-        if (forceShadowVeilActive) {
-            forceShadowVeilActive = false;
-            // this should not happen often mostly on client startup when it was on before we logged out, or on world hop
-            sleep(10_000, 15_000);
-            return true;
-        }
-        return lastShadowVeil + 60_000 <= System.currentTimeMillis() || !Rs2Magic.isShadowVeilActive();
+        final long current = System.currentTimeMillis();
+        if (current <= forceShadowVeilActive) return false;
+        return current > nextShadowVeil || !Rs2Magic.isShadowVeilActive();
     }
 
     private void castShadowVeil() {
@@ -549,15 +558,20 @@ public class ThievingScript extends Script {
             log.error("Failed to cast shadow veil");
             return;
         }
-        if (!sleepUntilWithInterrupt(() -> forceShadowVeilActive || Rs2Magic.isShadowVeilActive(), 1_200)) {
+        if (!sleepUntilWithInterrupt(() -> forceShadowVeilActive > System.currentTimeMillis() || Rs2Magic.isShadowVeilActive(), 2_400)) {
             log.error("Failed to await shadow veil active");
             return;
         }
-        lastShadowVeil = System.currentTimeMillis();
+        nextShadowVeil = System.currentTimeMillis()+60_000;
+    }
+
+    private int maxCoinPouches() {
+        if (config.coinPouchThreshold() >= 0) return config.coinPouchThreshold();
+        return plugin.getMaxCoinPouch();
     }
 
     private boolean shouldOpenCoinPouches() {
-        int threshold = Math.max(1, Math.min(plugin.getMaxCoinPouch(), config.coinPouchTreshHold() + (int)(Math.random() * 7 - 3)));
+        int threshold = Math.max(1, Math.min(plugin.getMaxCoinPouch(), maxCoinPouches() + (int)(Math.random() * (-7))));
         return Rs2Inventory.hasItemAmount("coin pouch", threshold, true);
     }
 
@@ -795,7 +809,7 @@ public class ThievingScript extends Script {
             hopWorld();
         }
 
-        if (walkTo(initialPlayerLocation)) {
+        if (walkTo("Return to npc", startingLocation, 3)) {
             sleepUntilWithInterrupt(() -> !Rs2Player.isMoving(), 1_200);
         }
         DOOR_TIMER.set();
@@ -851,5 +865,6 @@ public class ThievingScript extends Script {
         super.shutdown();
         Rs2Walker.setTarget(null);
         Microbot.isCantReachTargetDetectionEnabled = false;
+        startingLocation = null;
     }
 }

@@ -31,6 +31,15 @@ public class ThievingOverlay extends OverlayPanel {
         return "Closing in " + (time/1_000) + "s";
     }
 
+    private String getShadowVeilString() {
+        final long remaining = plugin.getThievingScript().forceShadowVeilActive-System.currentTimeMillis();
+        if (remaining > 0) {
+            return "Forced (" + (remaining/1_000) + "s)";
+        }
+        if (Rs2Magic.isShadowVeilActive()) return "Active";
+        return "Inactive";
+    }
+
     @Override
     public Dimension render(Graphics2D graphics) {
         try {
@@ -82,7 +91,7 @@ public class ThievingOverlay extends OverlayPanel {
                 panelComponent.getChildren().add(
                         LineComponent.builder()
                                 .left("Shadow Veil:")
-                                .right(Rs2Magic.isShadowVeilActive() ? "Active" : "Inactive")
+                                .right(getShadowVeilString())
                                 .build()
                 );
             }

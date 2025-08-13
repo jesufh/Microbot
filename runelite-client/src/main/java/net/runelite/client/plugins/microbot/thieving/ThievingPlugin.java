@@ -9,6 +9,7 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 import com.google.inject.Provides;
@@ -45,13 +46,14 @@ public class ThievingPlugin extends Plugin {
     private int startXp = 0;
 	@Getter
 	private int maxCoinPouch;
+    private String name = null;
 
     @Override
     protected void startUp() throws AWTException {
         if (overlayManager != null) {
             overlayManager.add(thievingOverlay);
         }
-        startXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
+        startXp = 0;
 		maxCoinPouch = determineMaxCoinPouch();
         thievingScript.run();
     }
@@ -59,12 +61,21 @@ public class ThievingPlugin extends Plugin {
     protected void shutDown() {
         thievingScript.shutdown();
         overlayManager.remove(thievingOverlay);
-        startXp = 0;
 		maxCoinPouch = 0;
+        startXp = 0;
+    }
+
+    private void setStartXp() {
+        // this should handle changing accounts
+        final String name = Rs2Player.getLocalPlayer().getName();
+        if (startXp == 0 || (name != null && !name.equals(this.name))) {
+            this.name = name;
+            startXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
+        }
     }
 
     public int xpGained() {
-        if (startXp == 0) startXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
+        setStartXp();
         final int currentXp = Microbot.getClient().getSkillExperience(Skill.THIEVING);
         return currentXp - startXp;
     }
@@ -93,6 +104,6 @@ public class ThievingPlugin extends Plugin {
     public void onChatMessage(ChatMessage event) {
         if (!event.getMessage().toLowerCase().contains("you can only cast shadow veil every 30 seconds.")) return;
         log.warn("Attempted to cast shadow veil while it was active");
-        getThievingScript().forceShadowVeilActive = true;
+        getThievingScript().forceShadowVeilActive = System.currentTimeMillis()+30_000;
     }
 }

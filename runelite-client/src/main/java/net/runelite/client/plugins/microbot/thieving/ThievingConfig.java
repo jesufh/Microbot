@@ -166,14 +166,14 @@ public interface ThievingConfig extends Config {
     String coinPouchSection = "Coin Pouch & Items";
 
     @ConfigItem(
-            keyName = "CoinPouchTreshHold",
+            keyName = "CoinPouchThreshold",
             name = "Coin Pouch Threshold",
-            description = "How many coin pouches to keep before opening them.",
+            description = "How many coin pouches to keep before opening them. -1 for Automatic.",
             position = 0,
             section = coinPouchSection
     )
-    default int coinPouchTreshHold() {
-        return 28;
+    default int coinPouchThreshold() {
+        return -1;
     }
 
     @ConfigItem(
