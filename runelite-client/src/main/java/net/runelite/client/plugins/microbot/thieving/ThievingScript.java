@@ -55,7 +55,7 @@ public class ThievingScript extends Script {
     @Getter(AccessLevel.PROTECTED)
     private volatile boolean underAttack;
 
-    protected volatile long forceShadowVeilActive = Long.MIN_VALUE;
+    protected volatile long forceShadowVeilActive = System.currentTimeMillis()-1_000;
     private long nextShadowVeil = 0;
 
     private static final int DOOR_CHECK_RADIUS = 10;
@@ -251,10 +251,21 @@ public class ThievingScript extends Script {
         return super.run();
     }
 
-    private boolean sleepUntilWithInterrupt(BooleanSupplier awaitedCondition, int time) {
-        final boolean result = sleepUntil(awaitedCondition, time);
-        if (!shouldRun()) throw new SelfInterruptException("Should not be running");
+    private boolean sleepUntilWithInterrupt(BooleanSupplier awaitedCondition, BooleanSupplier interruptCondition, int time) {
+        final AtomicBoolean interrupted = new AtomicBoolean(false);
+        final boolean result = sleepUntil(() -> {
+            if (interruptCondition.getAsBoolean()) {
+                interrupted.set(true);
+                return true;
+            }
+            return awaitedCondition.getAsBoolean();
+        }, time);
+        if (interrupted.get()) throw new SelfInterruptException("Should not be running");
         return result;
+    }
+
+    private boolean sleepUntilWithInterrupt(BooleanSupplier awaitedCondition, int time) {
+        return sleepUntilWithInterrupt(awaitedCondition, () -> !shouldRun(), time);
     }
 
     private boolean walkTo(String info, WorldPoint dst, int distance) {
@@ -639,13 +650,17 @@ public class ThievingScript extends Script {
         return true;
     }
 
-    private boolean repeatedAction(Runnable action, BooleanSupplier check, int maxTries) {
+    private boolean repeatedAction(Runnable action, BooleanSupplier awaitedCondition, BooleanSupplier interruptCondition, int maxTries) {
         for (int i = 0; i < maxTries; i++) {
-            if (check.getAsBoolean()) return true;
+            if (awaitedCondition.getAsBoolean()) return true;
             action.run();
-            sleepUntilWithInterrupt(check, 1_200);
+            sleepUntilWithInterrupt(awaitedCondition, interruptCondition, 1_200);
         }
         return false;
+    }
+
+    private boolean repeatedAction(Runnable action, BooleanSupplier check, int maxTries) {
+        return repeatedAction(action, check, () -> !shouldRun(), maxTries);
     }
 
     private boolean equip(String item, boolean shouldLog) {
@@ -705,43 +720,65 @@ public class ThievingScript extends Script {
         return exclusions;
     }
 
+
+
     private boolean getInventoryAmount(String name, int amount, boolean exact) {
-        final int deficit = amount - Rs2Inventory.itemQuantity(name, exact);
-        if (deficit == 0) return true;
-        if (deficit > 0) return Rs2Bank.hasBankItem(name, deficit, exact) && Rs2Bank.withdrawX(name, deficit, exact);
-        return Rs2Bank.depositX(name, deficit);
+        return repeatedAction(
+                () -> {
+                    final int deficit = amount-Rs2Inventory.itemQuantity(name, exact);
+                    if (deficit == 0) return;
+                    if (deficit > 0) {
+                        if (Rs2Bank.hasBankItem(name, deficit, exact)) Rs2Bank.withdrawX(name, deficit, exact);
+                    }
+                    else Rs2Bank.depositX(name, deficit);
+                },
+                () -> Rs2Inventory.itemQuantity(name, exact) == amount,
+                () -> {
+                    if (!Rs2Bank.isOpen()) {
+                        log.warn("Bank is closed while attempting to withdraw");
+                        return true;
+                    }
+                    return !shouldRun();
+                },
+                3
+        );
+    }
+
+    private void showMessage(String message) {
+        log.warn(message);
+        Microbot.showMessage(message);
     }
 
     private void bankAndEquip() {
-        BankLocation bank;
-        if (config.THIEVING_NPC() == ThievingNpc.VYRES && ThievingData.OUTSIDE_HALLOWED_BANK.distanceTo(Rs2Player.getWorldLocation()) < 20) {
-            log.info("Near Hallowed");
-            bank = BankLocation.HALLOWED_SEPULCHRE;
-            // it's not needed for banking, but if we have it in inv we should equip it
-            equip(ThievingData.VYRE_SET, false);
-        } else {
-            log.info("Not Near Hallowed");
-            bank = Rs2Bank.getNearestBank();
-            if (bank == BankLocation.DARKMEYER) {
-                if (!equip(ThievingData.VYRE_SET)) {
-                    log.error("Did not equip vyre set cannot go to darkmeyer bank");
-                    return;
+        if (!Rs2Bank.isOpen()) {
+            BankLocation bank;
+            if (config.THIEVING_NPC() == ThievingNpc.VYRES && ThievingData.OUTSIDE_HALLOWED_BANK.distanceTo(Rs2Player.getWorldLocation()) < 20) {
+                log.info("Near Hallowed");
+                bank = BankLocation.HALLOWED_SEPULCHRE;
+                // it's not needed for banking, but if we have it in inv we should equip it
+                equip(ThievingData.VYRE_SET, false);
+            } else {
+                log.info("Not Near Hallowed");
+                bank = Rs2Bank.getNearestBank();
+                if (bank == BankLocation.DARKMEYER) {
+                    if (!equip(ThievingData.VYRE_SET)) {
+                        log.error("Did not equip vyre set cannot go to darkmeyer bank");
+                        return;
+                    }
                 }
             }
+
+            if (!isRunning()) return;
+            boolean opened = Rs2Bank.isNearBank(bank, 8) ? Rs2Bank.openBank() : Rs2Bank.walkToBankAndUseBank(bank);
+            if (!opened || !Rs2Bank.isOpen()) return;
         }
 
-        if (Thread.currentThread().isInterrupted() || !isRunning()) return;
-        boolean opened = Rs2Bank.isNearBank(bank, 8) ? Rs2Bank.openBank() : Rs2Bank.walkToBankAndUseBank(bank);
-        if (!opened || !Rs2Bank.isOpen()) return;
-
-        if (Thread.currentThread().isInterrupted() || !isRunning()) return;
+        if (!isRunning()) return;
         Rs2Bank.depositAllExcept(getExclusions());
 
-        boolean successfullyWithdrawFood = getInventoryAmount(config.food().getName(), config.foodAmount(), true);
-        Rs2Inventory.waitForInventoryChanges(1_500);
-
-        if (!successfullyWithdrawFood) {
-            Microbot.showMessage("No " + config.food().getName() + " found in bank.");
+        if (!getInventoryAmount(config.food().getName(), config.foodAmount(), true)) {
+            if (!Rs2Bank.isOpen()) return;
+            showMessage("No " + config.food().getName() + " found in bank.");
             shutdown();
             return;
         }
@@ -759,11 +796,9 @@ public class ThievingScript extends Script {
             }
         }
 
-        boolean successDodgy = getInventoryAmount("Dodgy necklace", config.dodgyNecklaceAmount(), true);
-        Rs2Inventory.waitForInventoryChanges(1_500);
-
-        if (!successDodgy) {
-            Microbot.showMessage("No Dodgy necklace found in bank.");
+        if (!getInventoryAmount("Dodgy necklace", config.dodgyNecklaceAmount(), true)) {
+            if (!Rs2Bank.isOpen()) return;
+            showMessage("No Dodgy necklace found in bank.");
             shutdown();
             return;
         }
@@ -781,7 +816,8 @@ public class ThievingScript extends Script {
                         Rs2Bank.withdrawAll(true, "Earth rune", true);
                         Rs2Inventory.waitForInventoryChanges(1_500);
                     } else {
-                        Microbot.showMessage("No Lava battlestaff and runes (Earth, Fire) found in bank.");
+                        if (!shouldRun() || !Rs2Bank.isOpen()) return;
+                        showMessage("No Lava battlestaff and runes (Earth, Fire) found in bank.");
                         shutdown();
                         return;
                     }
@@ -795,7 +831,8 @@ public class ThievingScript extends Script {
             Rs2Bank.withdrawAll(true, "Cosmic rune", true);
             Rs2Inventory.waitForInventoryChanges(1_500);
             if (!Rs2Inventory.hasItem("Cosmic rune")) {
-                Microbot.showMessage("No Cosmic runes found.");
+                if (!shouldRun() || !Rs2Bank.isOpen()) return;
+                showMessage("No Cosmic runes found.");
                 shutdown();
                 return;
             }
