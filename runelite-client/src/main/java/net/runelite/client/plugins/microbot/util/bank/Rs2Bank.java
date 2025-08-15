@@ -729,7 +729,7 @@ public class Rs2Bank {
      *
      * @return true if any items were deposited, false otherwise.
      */
-    public static boolean depositAllExcept(List<String> names) {
+    public static boolean depositAllExcept(Collection<String> names) {
         return depositAllExcept(names.toArray(String[]::new));
     }
 

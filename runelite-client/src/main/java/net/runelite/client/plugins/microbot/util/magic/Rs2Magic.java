@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.util.magic;
 
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.Point;
 import net.runelite.api.gameval.ItemID;
@@ -40,6 +41,7 @@ import java.util.stream.Stream;
 import static net.runelite.client.plugins.microbot.Microbot.log;
 import static net.runelite.client.plugins.microbot.util.Global.*;
 
+@Slf4j
 public class Rs2Magic {
     //use this boolean to do one time checks
     private static boolean checkedSpellBook = false;
@@ -52,7 +54,10 @@ public class Rs2Magic {
     public static boolean oneTimeSpellBookCheck() {
         if (checkedSpellBook) return true;
         if (!Rs2Player.hasCompletedTutorialIsland()) return true;
-        if (!Rs2SpellBookSettings.configureSpellbookSettings()) return false;
+        if (!Rs2SpellBookSettings.configureSpellbookSettings()) {
+            log.error("Failed to configure spellbook filtering");
+            return false;
+        }
 
         checkedSpellBook = true;
         return true;
@@ -77,8 +82,8 @@ public class Rs2Magic {
             return false;
         }
 
-        if (Rs2Tab.getCurrentTab() != InterfaceTab.MAGIC) {
-            Rs2Tab.switchToMagicTab();
+        if (!Rs2Tab.isCurrentTab(InterfaceTab.MAGIC)) {
+            Rs2Tab.switchTo(InterfaceTab.MAGIC);
             sleep(150, 300);
         }
 

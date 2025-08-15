@@ -63,6 +63,39 @@ public interface ThievingConfig extends Config {
         return false;
     }
 
+    @ConfigItem(
+            keyName = "escapeAttackingNpcs",
+            name = "Escape Attacking NPCs",
+            description = "Whether the bot should run away if its being attacked",
+            position = 1,
+            section = buffsSection
+    )
+    default boolean escapeAttacking() {
+        return true;
+    }
+
+    @ConfigItem(
+            keyName = "customEscapeLocation",
+            name = "Custom Escape Location",
+            description = "Where the bot should run to if its attack. Format: digitX,digitY,digitZ",
+            position = 2,
+            section = buffsSection
+    )
+    default String customEscapeLocation() {
+        return "";
+    }
+
+    @ConfigItem(
+            keyName = "ignoreStuns",
+            name = "Ignore Stuns",
+            description = "Whether the bot should ignore stuns and keep left clicking",
+            position = 3,
+            section = buffsSection
+    )
+    default boolean ignoreStuns() {
+        return true;
+    }
+
     @ConfigSection(
             name = "Food",
             description = "Food and eating settings.",
@@ -133,14 +166,14 @@ public interface ThievingConfig extends Config {
     String coinPouchSection = "Coin Pouch & Items";
 
     @ConfigItem(
-            keyName = "CoinPouchTreshHold",
+            keyName = "CoinPouchThreshold",
             name = "Coin Pouch Threshold",
-            description = "How many coin pouches to keep before opening them.",
+            description = "How many coin pouches to keep before opening them. -1 for Automatic.",
             position = 0,
             section = coinPouchSection
     )
-    default int coinPouchTreshHold() {
-        return 28;
+    default int coinPouchThreshold() {
+        return -1;
     }
 
     @ConfigItem(

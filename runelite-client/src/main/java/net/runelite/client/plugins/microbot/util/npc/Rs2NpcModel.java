@@ -5,10 +5,17 @@ import lombok.Getter;
 import net.runelite.api.NPC;
 import net.runelite.api.NPCComposition;
 import net.runelite.api.NpcOverrides;
+import net.runelite.api.Player;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.ActorModel;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.Arrays;
+import java.util.Objects;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 
 @Getter
 @EqualsAndHashCode(callSuper = true) // Ensure equality checks include ActorModel fields
@@ -95,8 +102,16 @@ public class Rs2NpcModel extends ActorModel implements NPC
 	 */
 	public int getDistanceFromPlayer() {
 		return Microbot.getClientThread().runOnClientThreadOptional(() -> {
-			return this.getLocalLocation().distanceTo(
-					Microbot.getClient().getLocalPlayer().getLocalLocation());
+			final LocalPoint localPoint = this.getLocalLocation();
+			if (localPoint == null) return Integer.MAX_VALUE;
+
+			final Player player = Microbot.getClient().getLocalPlayer();
+			if (player == null) return Integer.MAX_VALUE;
+
+			final LocalPoint playerPoint = player.getLocalLocation();
+			if (playerPoint == null) return Integer.MAX_VALUE;
+
+			return localPoint.distanceTo(playerPoint);
 		}).orElse(Integer.MAX_VALUE);
 	}
 
@@ -149,5 +164,17 @@ public class Rs2NpcModel extends ActorModel implements NPC
 		return (double) ratio / (double) scale * 100.0;
 	}
 
-	
+	private static <T> Predicate<Rs2NpcModel> matches(T[] values, BiPredicate<Rs2NpcModel, T> biPredicate) {
+		return item -> Arrays.stream(values).filter(Objects::nonNull).anyMatch(value -> biPredicate.test(item, value));
+	}
+
+	public static Predicate<Rs2NpcModel> matches(boolean exact, String... names) {
+		return matches(names, exact ? (npc, name) -> {
+			final String npcName = npc.getName();
+			return npcName != null && npcName.equalsIgnoreCase(name);
+		} : (npc, name) -> {
+			final String npcName = npc.getName();
+			return npcName != null && npcName.toLowerCase().contains(name.toLowerCase());
+		});
+	}
 }
